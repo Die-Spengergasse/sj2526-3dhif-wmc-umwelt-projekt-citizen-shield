@@ -6,3 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
+ai-studio-applet-webapp-55189-firebase-adminsdk-fbsvc-9816737694.json
