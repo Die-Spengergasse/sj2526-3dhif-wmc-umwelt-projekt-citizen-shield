@@ -4,6 +4,7 @@ export type PostType = 'critical' | 'info' | 'broadcast';
 
 export interface Post {
   id: string;
+  regionId: string;
   time: string;
   title: string;
   description: string;
@@ -11,11 +12,20 @@ export interface Post {
   image?: string;
   tags?: string[];
   icon?: React.ReactNode;
-  regionId: string;
+  upvoteCount: number;
+  downvoteCount: number;
+  author?: {
+    id: string;
+    displayName: string;
+    avatarUrl: string | null;
+    isVerified: boolean;
+  };
+  createdAt?: string;
 }
 
 export interface Region {
   id: string;
+  slug: string;
   name: string;
   intensity: 'CRITICAL' | 'HIGH' | 'STABLE' | 'ALERT';
   activeHubs: number;

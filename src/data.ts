@@ -3,6 +3,7 @@ import { Region, Post } from './types';
 export const INITIAL_REGIONS: Region[] = [
   {
     id: 'nepal',
+    slug: 'nepal',
     name: 'NEPAL',
     intensity: 'CRITICAL',
     activeHubs: 14,
@@ -18,6 +19,7 @@ export const INITIAL_REGIONS: Region[] = [
   },
   {
     id: 'myanmar',
+    slug: 'myanmar',
     name: 'MYANMAR',
     intensity: 'HIGH',
     activeHubs: 28,
@@ -33,6 +35,7 @@ export const INITIAL_REGIONS: Region[] = [
   },
   {
     id: 'sudan',
+    slug: 'sudan',
     name: 'SUDAN',
     intensity: 'CRITICAL',
     activeHubs: 12,
@@ -48,6 +51,7 @@ export const INITIAL_REGIONS: Region[] = [
   },
   {
     id: 'iran',
+    slug: 'iran',
     name: 'IRAN',
     intensity: 'HIGH',
     activeHubs: 42,
@@ -63,6 +67,7 @@ export const INITIAL_REGIONS: Region[] = [
   },
   {
     id: 'georgia',
+    slug: 'georgia',
     name: 'GEORGIA',
     intensity: 'ALERT',
     activeHubs: 18,
@@ -87,6 +92,8 @@ export const INITIAL_POSTS: Post[] = [
     description: 'Over 5,000 activists have successfully established a non-violent perimeter. State security forces are assembling at the southern gate. Avoid the Baneshwor route; secure corridor established through New Road.',
     type: 'critical',
     image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBBhc6g7InHjxlakizsKbeR1BiLvVqQYrSvqlw1d_ReDC7Kp-2vlrTdLg5ZhLnTxIuxHiktkrp3e3lYPOFl92bJ_Mqov7xfuoFAzcKPu7THTAmtbD2t-PZNNVMvzQn3-3x2dgATmO3eNu9mw9h7cR_ZwAGRdoB0eN7S25CNArc4J1qz0oFebM3KKIe8m1Cgqg0Ifyl5rIgAKiRdIGUxenxov4kXcrKiAGEA2kZpwg7Q1seNmQZYs5xsT9oTWJ7porIAlBrI71vT3hE',
+    upvoteCount: 0,
+    downvoteCount: 0,
   },
   {
     id: '2',
@@ -96,6 +103,8 @@ export const INITIAL_POSTS: Post[] = [
     description: 'Local coordination centers in Pokhara report 100% participation in the general strike. Public transport remains suspended. Secure mesh networks are active near the lakeside.',
     type: 'info',
     tags: ['RegionalStrike', 'ConnectivitySafe'],
+    upvoteCount: 0,
+    downvoteCount: 0,
   },
   {
     id: '3',
@@ -105,6 +114,8 @@ export const INITIAL_POSTS: Post[] = [
     description: 'New nodes established in Hlaing Tharyar. Citizens are encouraged to connect to the "CDM-Secure" SSID for encrypted local communication.',
     type: 'info',
     tags: ['MeshNet', 'Yangon'],
+    upvoteCount: 0,
+    downvoteCount: 0,
   },
   {
     id: '4',
@@ -113,5 +124,7 @@ export const INITIAL_POSTS: Post[] = [
     title: 'Khartoum Medical Supply Drop',
     description: 'Emergency supplies delivered to the Omdurman neighborhood hub. Volunteers needed for distribution. Contact your local coordinator.',
     type: 'critical',
+    upvoteCount: 0,
+    downvoteCount: 0,
   }
 ];

@@ -1,14 +1,10 @@
 import React from 'react';
-import { 
-  AlertTriangle, 
-  Radio, 
-  Verified, 
-  Map as MapIcon, 
-  MessageSquare, 
+import {
+  Radio,
   Clock,
   Filter,
   ShieldAlert,
-  Heart
+  Loader2
 } from 'lucide-react';
 import { TimelineItem } from '../components/TimelineItem';
 import { Post, Region } from '../types';
@@ -20,11 +16,13 @@ interface FeedViewProps {
   regions: Region[];
   activeRegion: Region;
   direction: number;
+  loadingPosts: boolean;
   onPostClick: () => void;
   onRegionSelect: (index: number) => void;
+  onVote: (postId: string, voteType: 'upvote' | 'downvote') => void;
 }
 
-export const FeedView = ({ posts, regions, activeRegion, direction, onPostClick, onRegionSelect }: FeedViewProps) => {
+export const FeedView = ({ posts, regions, activeRegion, direction, loadingPosts, onPostClick, onRegionSelect, onVote }: FeedViewProps) => {
   return (
     <div className="space-y-12">
       <AnimatePresence mode="wait" custom={direction}>
@@ -58,13 +56,13 @@ export const FeedView = ({ posts, regions, activeRegion, direction, onPostClick,
                   Verified reports from community hubs across {activeRegion.name}. Stay informed with real-time, citizen-led intelligence.
                 </p>
               </div>
-              
+
               <div className="flex gap-3">
                 <button className="flex items-center gap-2 px-6 py-3 bg-surface-container-high border border-black/5 rounded-xl font-bold font-headline uppercase tracking-tighter text-sm hover:bg-surface-container-highest transition-all">
                   <Filter size={16} />
                   Filter Reports
                 </button>
-                <button 
+                <button
                   onClick={onPostClick}
                   className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-xl font-bold font-headline uppercase tracking-tighter text-sm hover:scale-105 transition-all shadow-md shadow-primary/20"
                 >
@@ -78,18 +76,26 @@ export const FeedView = ({ posts, regions, activeRegion, direction, onPostClick,
           <div className="grid grid-cols-12 gap-8">
             <section className="col-span-12 lg:col-span-8 relative">
               <div className="absolute left-[11px] top-0 bottom-0 w-[2px] bg-primary/10" />
-              
-              {posts.length > 0 ? (
+
+              {loadingPosts ? (
+                <div className="p-12 text-center">
+                  <Loader2 size={32} className="mx-auto animate-spin text-primary/40" />
+                </div>
+              ) : posts.length > 0 ? (
                 posts.map(post => (
-                  <TimelineItem 
+                  <TimelineItem
                     key={post.id}
+                    id={post.id}
                     time={post.time}
                     title={post.title}
                     description={post.description}
                     type={post.type}
                     image={post.image}
                     tags={post.tags}
-                    icon={post.icon}
+                    upvoteCount={post.upvoteCount}
+                    downvoteCount={post.downvoteCount}
+                    author={post.author}
+                    onVote={onVote}
                   />
                 ))
               ) : (
@@ -137,17 +143,17 @@ export const FeedView = ({ posts, regions, activeRegion, direction, onPostClick,
                 <h3 className="font-headline font-black text-xl uppercase tracking-tighter mb-4">Switch Region</h3>
                 <div className="space-y-3">
                   {regions.map((region, index) => (
-                    <RegionStatus 
+                    <RegionStatus
                       key={region.id}
-                      name={region.name} 
-                      status={region.intensity} 
+                      name={region.name}
+                      status={region.intensity}
                       isActive={activeRegion.id === region.id}
                       onClick={() => onRegionSelect(index)}
                       color={
-                        region.intensity === 'CRITICAL' ? 'text-primary' : 
-                        region.intensity === 'HIGH' ? 'text-primary-dim' : 
+                        region.intensity === 'CRITICAL' ? 'text-primary' :
+                        region.intensity === 'HIGH' ? 'text-primary-dim' :
                         region.intensity === 'ALERT' ? 'text-tertiary' : 'text-secondary'
-                      } 
+                      }
                     />
                   ))}
                 </div>
@@ -176,7 +182,7 @@ interface RegionStatusProps {
 }
 
 const RegionStatus: React.FC<RegionStatusProps> = ({ name, status, color, isActive, onClick }) => (
-  <button 
+  <button
     onClick={onClick}
     className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
       isActive ? 'bg-primary/5 border-primary' : 'bg-background border-black/5 hover:border-primary/20'

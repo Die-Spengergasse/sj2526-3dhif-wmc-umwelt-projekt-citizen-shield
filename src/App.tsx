@@ -1,10 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  AlertTriangle, 
-  ArrowRight, 
-  Radio, 
-  CloudUpload, 
+import {
+  AlertTriangle,
+  Radio,
   ShieldAlert,
   Verified,
   Map as MapIcon,
@@ -15,7 +13,8 @@ import {
   Info,
   MessageSquare,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
@@ -30,32 +29,130 @@ import { SafetyView } from './views/SafetyView';
 import { INITIAL_REGIONS, INITIAL_POSTS } from './data';
 import { Post, Region, PostType } from './types';
 import { carouselVariants } from './constants';
+import { fetchRegions, fetchRegionDetail, fetchPosts, createPost, voteOnPost, joinRegion } from './api';
+import { useAuth } from './context/AuthContext';
 
 export default function App() {
+  const { firebaseUser, signIn } = useAuth();
   const [currentView, setCurrentView] = useState('regions');
   const [activeChatRegion, setActiveChatRegion] = useState<string | null>(null);
-  const [regions] = useState<Region[]>(INITIAL_REGIONS);
+  const [regions, setRegions] = useState<Region[]>(INITIAL_REGIONS);
   const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
   const [activeRegionIndex, setActiveRegionIndex] = useState(0);
   const [direction, setDirection] = useState(0);
   const [isPostFormOpen, setIsPostFormOpen] = useState(false);
   const [isRegionSelectorOpen, setIsRegionSelectorOpen] = useState(false);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [joining, setJoining] = useState(false);
 
   const activeRegion = regions[activeRegionIndex];
-  const regionPosts = posts.filter(p => p.regionId === activeRegion.id);
+  const regionPosts = posts.filter(p => p.regionId === activeRegion.slug);
 
-  const handleNewPost = (newPostData: { title: string; description: string; type: PostType; image?: string }) => {
-    const newPost: Post = {
-      id: Date.now().toString(),
-      regionId: activeRegion.id,
-      time: 'Just Now',
-      title: newPostData.title,
-      description: newPostData.description,
-      type: newPostData.type,
-      image: newPostData.image,
-      icon: newPostData.type === 'critical' ? <AlertTriangle size={20} /> : <Verified size={20} />
-    };
-    setPosts([newPost, ...posts]);
+  // Fetch regions from API on mount
+  useEffect(() => {
+    fetchRegions()
+      .then(setRegions)
+      .catch(() => { /* fallback to INITIAL_REGIONS already in state */ });
+  }, []);
+
+  // Fetch region detail (safe zones, resources) when active region changes
+  useEffect(() => {
+    if (!activeRegion) return;
+    fetchRegionDetail(activeRegion.slug)
+      .then((detail) => {
+        setRegions(prev => prev.map(r => r.slug === detail.slug ? detail : r));
+      })
+      .catch(() => { /* keep existing data */ });
+  }, [activeRegion?.slug]);
+
+  // Fetch posts when active region changes
+  const loadPosts = useCallback((slug: string) => {
+    setLoadingPosts(true);
+    fetchPosts(slug)
+      .then((apiPosts) => {
+        setPosts(prev => {
+          const otherRegionPosts = prev.filter(p => p.regionId !== slug);
+          return [...apiPosts, ...otherRegionPosts];
+        });
+      })
+      .catch(() => { /* fallback to existing posts */ })
+      .finally(() => setLoadingPosts(false));
+  }, []);
+
+  useEffect(() => {
+    if (!activeRegion) return;
+    loadPosts(activeRegion.slug);
+  }, [activeRegion?.slug, loadPosts]);
+
+  const handleNewPost = async (newPostData: { title: string; description: string; type: PostType; imageUrl?: string }) => {
+    if (!firebaseUser) return;
+
+    try {
+      await createPost({
+        regionSlug: activeRegion.slug,
+        title: newPostData.title,
+        description: newPostData.description,
+        type: newPostData.type,
+        imageUrl: newPostData.imageUrl,
+      });
+      // Reload posts to get the new one from the DB
+      loadPosts(activeRegion.slug);
+    } catch (err) {
+      console.error('Failed to create post:', err);
+      // Optimistic fallback: add to local state
+      const fallbackPost: Post = {
+        id: Date.now().toString(),
+        regionId: activeRegion.slug,
+        time: 'Just Now',
+        title: newPostData.title,
+        description: newPostData.description,
+        type: newPostData.type,
+        image: newPostData.imageUrl,
+        upvoteCount: 0,
+        downvoteCount: 0,
+      };
+      setPosts(prev => [fallbackPost, ...prev]);
+    }
+  };
+
+  const handleVote = async (postId: string, voteType: 'upvote' | 'downvote') => {
+    if (!firebaseUser) {
+      signIn();
+      return;
+    }
+    try {
+      const result = await voteOnPost(postId, voteType);
+      setPosts(prev => prev.map(p =>
+        p.id === postId
+          ? { ...p, upvoteCount: result.upvoteCount, downvoteCount: result.downvoteCount }
+          : p
+      ));
+    } catch (err) {
+      console.error('Vote failed:', err);
+    }
+  };
+
+  const handleJoinRegion = async () => {
+    if (!firebaseUser) {
+      signIn();
+      return;
+    }
+    setJoining(true);
+    try {
+      await joinRegion(activeRegion.slug);
+    } catch (err) {
+      console.error('Join region failed:', err);
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const handleOpenPostForm = () => {
+    if (!firebaseUser) {
+      signIn();
+      return;
+    }
+    setIsPostFormOpen(true);
   };
 
   const nextRegion = () => {
@@ -71,23 +168,24 @@ export default function App() {
     <div className="min-h-screen bg-background text-on-surface font-body selection:bg-primary selection:text-black">
       <TopNav currentView={currentView} onViewChange={setCurrentView} />
       <Sidebar currentView={currentView} onViewChange={setCurrentView} />
-      
+
       <main className="lg:pl-64 pt-24 pb-32 px-4 md:px-8 max-w-7xl mx-auto overflow-x-hidden">
         <AnimatePresence>
           {activeChatRegion && (
-            <Chat 
-              region={activeChatRegion} 
-              onClose={() => setActiveChatRegion(null)} 
+            <Chat
+              region={activeChatRegion}
+              onClose={() => setActiveChatRegion(null)}
             />
           )}
           {isPostFormOpen && (
-            <PostForm 
-              onClose={() => setIsPostFormOpen(false)} 
-              onSubmit={handleNewPost} 
+            <PostForm
+              regionSlug={activeRegion.slug}
+              onClose={() => setIsPostFormOpen(false)}
+              onSubmit={handleNewPost}
             />
           )}
           {isRegionSelectorOpen && (
-            <RegionSelector 
+            <RegionSelector
               regions={regions}
               activeRegionId={activeRegion.id}
               onSelect={setActiveRegionIndex}
@@ -95,7 +193,7 @@ export default function App() {
             />
           )}
         </AnimatePresence>
-        
+
         <div className="relative overflow-x-hidden">
           <AnimatePresence mode="wait">
             {currentView === 'regions' ? (
@@ -127,12 +225,12 @@ export default function App() {
                             <span className="bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white rounded-full shadow-sm">Community Alert</span>
                             <span className="text-on-surface-variant text-xs">Verified by Local Hub: 12m ago</span>
                           </div>
-                          
+
                           <div className="flex items-center gap-4 mb-4">
                             <button onClick={prevRegion} className="p-2 hover:bg-black/5 rounded-full transition-colors">
                               <ChevronLeft size={32} className="text-primary" />
                             </button>
-                            <button 
+                            <button
                               onClick={() => setIsRegionSelectorOpen(true)}
                               className="text-6xl md:text-8xl font-black font-headline tracking-tighter text-on-surface leading-none uppercase hover:text-primary transition-colors text-left"
                             >
@@ -147,19 +245,22 @@ export default function App() {
                             {activeRegion.description}
                           </p>
                         </div>
-                        
+
                         <div className="flex flex-wrap gap-3">
-                          <motion.button 
+                          <motion.button
                             whileHover={{ scale: 1.05, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                             whileTap={{ scale: 0.95 }}
-                            className="bg-primary text-white px-6 py-3 rounded-xl font-bold font-headline uppercase tracking-tighter flex items-center gap-2"
+                            onClick={handleJoinRegion}
+                            disabled={joining}
+                            className="bg-primary text-white px-6 py-3 rounded-xl font-bold font-headline uppercase tracking-tighter flex items-center gap-2 disabled:opacity-60"
                           >
-                            <Handshake size={18} />
+                            {joining ? <Loader2 size={18} className="animate-spin" /> : <Handshake size={18} />}
                             Offer Support
                           </motion.button>
-                          <motion.button 
+                          <motion.button
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
+                            onClick={() => setCurrentView('safety')}
                             className="bg-surface-container-highest border border-black/5 text-on-surface px-6 py-3 rounded-xl font-bold font-headline uppercase tracking-tighter"
                           >
                             Safety Guide
@@ -174,21 +275,21 @@ export default function App() {
                         <div className="absolute top-0 left-0 w-1 h-full bg-primary" />
                         <h3 className="text-on-surface-variant text-xs font-bold uppercase tracking-[0.2em] mb-4">Intensity Level</h3>
                         <div className={`text-4xl font-headline font-black mb-2 ${
-                          activeRegion.intensity === 'CRITICAL' ? 'text-primary' : 
-                          activeRegion.intensity === 'HIGH' ? 'text-primary-dim' : 
+                          activeRegion.intensity === 'CRITICAL' ? 'text-primary' :
+                          activeRegion.intensity === 'HIGH' ? 'text-primary-dim' :
                           activeRegion.intensity === 'ALERT' ? 'text-tertiary' : 'text-secondary'
                         }`}>
                           {activeRegion.intensity}
                         </div>
                         <p className="text-sm text-on-surface-variant">Real-time mobilization status confirmed by local community nodes.</p>
                       </div>
-                      
+
                       <div className="bg-surface-container-high p-6 rounded-xl border-l-4 border-secondary flex flex-col justify-between border-y border-r border-black/5">
                         <h3 className="text-secondary text-xs font-bold uppercase tracking-widest">Active Hubs</h3>
                         <div className="text-5xl font-headline font-black text-secondary">{activeRegion.activeHubs}</div>
                         <p className="text-[10px] uppercase font-bold text-on-surface-variant">Verified nodes</p>
                       </div>
-                      
+
                       <div className="bg-surface-container-high p-6 rounded-xl border-l-4 border-primary flex flex-col justify-between border-y border-r border-black/5">
                         <h3 className="text-primary text-xs font-bold uppercase tracking-widest">Connectivity</h3>
                         <div className="text-5xl font-headline font-black text-primary">{activeRegion.connectivity}%</div>
@@ -245,18 +346,26 @@ export default function App() {
                       {/* Timeline Section */}
                       <section className="col-span-12 lg:col-span-8 relative">
                         <div className="absolute left-[11px] top-0 bottom-0 w-[2px] bg-primary/10" />
-                        
-                        {regionPosts.length > 0 ? (
+
+                        {loadingPosts ? (
+                          <div className="p-12 text-center">
+                            <Loader2 size={32} className="mx-auto animate-spin text-primary/40" />
+                          </div>
+                        ) : regionPosts.length > 0 ? (
                           regionPosts.map(post => (
-                            <TimelineItem 
+                            <TimelineItem
                               key={post.id}
+                              id={post.id}
                               time={post.time}
                               title={post.title}
                               description={post.description}
                               type={post.type}
                               image={post.image}
                               tags={post.tags}
-                              icon={post.icon}
+                              upvoteCount={post.upvoteCount}
+                              downvoteCount={post.downvoteCount}
+                              author={post.author}
+                              onVote={handleVote}
                             />
                           ))
                         ) : (
@@ -278,9 +387,9 @@ export default function App() {
                             </div>
                           </div>
                           <div className="aspect-square bg-surface-container-highest flex items-center justify-center relative">
-                            <img 
-                              className="w-full h-full object-cover opacity-50 grayscale" 
-                              src={activeRegion.mapImage} 
+                            <img
+                              className="w-full h-full object-cover opacity-50 grayscale"
+                              src={activeRegion.mapImage}
                               alt={`${activeRegion.name} Map`}
                               referrerPolicy="no-referrer"
                             />
@@ -295,18 +404,18 @@ export default function App() {
                         {/* Reporting Tools */}
                         <div className="bg-surface-container p-6 rounded-xl space-y-4 border border-black/5">
                           <h5 className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-4">Community Tools</h5>
-                          <ActionButton 
-                            label="Join Regional Chat" 
-                            icon={<MessageSquare size={18} />} 
-                            color="text-primary" 
+                          <ActionButton
+                            label="Join Regional Chat"
+                            icon={<MessageSquare size={18} />}
+                            color="text-primary"
                             onClick={() => setActiveChatRegion(activeRegion.id)}
                           />
                           <ActionButton label="Request Emergency Aid" icon={<Heart size={18} />} color="text-secondary" />
-                          <ActionButton 
-                            label="Share Safety Update" 
-                            icon={<Radio size={18} />} 
-                            color="text-tertiary" 
-                            onClick={() => setIsPostFormOpen(true)}
+                          <ActionButton
+                            label="Share Safety Update"
+                            icon={<Radio size={18} />}
+                            color="text-tertiary"
+                            onClick={handleOpenPostForm}
                           />
                           <ActionButton label="Volunteer for Local Hub" icon={<Users size={18} />} color="text-primary" />
                         </div>
@@ -346,13 +455,15 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.3 }}
             >
-              <FeedView 
-                posts={regionPosts} 
-                regions={regions} 
+              <FeedView
+                posts={regionPosts}
+                regions={regions}
                 activeRegion={activeRegion}
                 direction={direction}
-                onPostClick={() => setIsPostFormOpen(true)} 
+                loadingPosts={loadingPosts}
+                onPostClick={handleOpenPostForm}
                 onRegionSelect={setActiveRegionIndex}
+                onVote={handleVote}
               />
             </motion.div>
           ) : currentView === 'safety' ? (
@@ -363,8 +474,8 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.3 }}
             >
-              <SafetyView 
-                activeRegion={activeRegion} 
+              <SafetyView
+                activeRegion={activeRegion}
                 direction={direction}
               />
             </motion.div>
@@ -384,23 +495,23 @@ export default function App() {
                   >
                     <Info size={80} className="text-primary/40 mx-auto mb-8" />
                   </motion.div>
-                  
+
                   <h2 className="text-4xl font-headline font-black mb-4 uppercase tracking-tighter text-primary">
                     {currentView.toUpperCase()} HUB COMING SOON
                   </h2>
                   <div className="w-24 h-1 bg-primary/10 mx-auto mb-6 rounded-full overflow-hidden">
-                    <motion.div 
+                    <motion.div
                       animate={{ x: [-100, 100] }}
                       transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                       className="w-full h-full bg-primary/40"
                     />
                   </div>
                   <p className="text-on-surface-variant max-w-md mx-auto font-body text-sm leading-relaxed">
-                    Our community volunteers are currently organizing the {currentView} resources. 
-                    We are working to ensure all information is verified and safe for public use. 
+                    Our community volunteers are currently organizing the {currentView} resources.
+                    We are working to ensure all information is verified and safe for public use.
                     Check back soon for updates.
                   </p>
-                  <motion.button 
+                  <motion.button
                     whileHover={{ scale: 1.05, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setCurrentView('regions')}
@@ -422,7 +533,7 @@ export default function App() {
             <ShieldCheck size={24} />
             CITIZEN SHIELD
           </div>
-          <p className="text-[10px] font-bold tracking-[0.3em] text-gray-600 uppercase">© 2024 CITIZEN SHIELD. COMMUNITY POWERED.</p>
+          <p className="text-[10px] font-bold tracking-[0.3em] text-gray-600 uppercase">&copy; 2024 CITIZEN SHIELD. COMMUNITY POWERED.</p>
         </div>
         <div className="flex flex-wrap justify-center gap-8">
           <FooterLink label="Community Guidelines" />
@@ -438,7 +549,7 @@ export default function App() {
 }
 
 const ActionButton = ({ label, icon, color, onClick }: { label: string, icon: React.ReactNode, iconColor?: string, color?: string, onClick?: () => void }) => (
-  <motion.button 
+  <motion.button
     whileHover={{ x: 4 }}
     onClick={onClick}
     className="w-full flex items-center justify-between p-4 bg-surface-container-low hover:bg-surface-container-highest rounded-lg transition-all group"
