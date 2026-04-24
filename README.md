@@ -45,16 +45,18 @@ Edit `.env` and fill in your credentials:
 
 ### 3. Set up the database
 
-The database setup is split into two steps. You only need `psql` and access to the PostgreSQL superuser (typically `postgres`).
+You only need `psql` and access to the PostgreSQL superuser (typically `postgres`).
 
-#### 3a. Create database, admin role, permissions and extensions
-
-`Backend/000_setup.sql` is self-contained and idempotent. In one pass it creates the `citizen_shield` database, the `citizen_shield_admin` role (full DDL + DML rights on current and future objects), and installs the required extensions (`pgcrypto`, `earthdistance`) — which require superuser.
+`Backend/000_citizen_shield_complete.sql` is fully self-contained and idempotent. In a single pass it:
+- creates the `citizen_shield` database and the `citizen_shield_admin` role
+- grants full DDL + DML rights on current and future objects
+- installs the required extensions (`pgcrypto`, `earthdistance`) — which require superuser
+- creates all tables, enums, indexes, triggers, and seeds initial region data
 
 Run it as the `postgres` superuser and pass the admin password via `-v`:
 
 ```bash
-psql -h localhost -U postgres -v admin_password=YourStrongPassword -f Backend/000_setup.sql
+psql -h localhost -U postgres -v admin_password=DeinSicheresPasswort -f Backend/000_citizen_shield_complete.sql
 ```
 
 Then put the same password into your `.env` file:
@@ -65,21 +67,7 @@ DATABASE_URL=postgres://citizen_shield_admin:<your_password>@localhost:5432/citi
 
 > Re-running the script is safe: if the role or database already exists, the password is updated and ownership is re-applied.
 
-#### 3b. Run the schema migration
-
-Now load the schema and seed data **as the new admin user**, so every table, trigger and function is owned by `citizen_shield_admin`:
-
-```bash
-psql -h localhost -U citizen_shield_admin -d citizen_shield -f Backend/001_citizen_shield_migration.sql
-```
-
-This creates all tables, enums, indexes, triggers, and seeds initial region data (Nepal, Myanmar, Sudan, Iran, Georgia). The `CREATE EXTENSION` calls inside `001` become no-ops because the extensions were already installed in step 3a.
-
-> **Troubleshooting**
-> - *"role already exists"* / *"database already exists"* — safe to ignore, `000_setup.sql` is idempotent.
-> - Forgot to pass `-v admin_password=...`? The script falls back to `CHANGE_ME_STRONG_PASSWORD` and prints a warning. Re-run with the real password to rotate it.
-
-> **Legacy note:** the older two-step flow (`002_create_admin_user.sql` against a pre-created database, then `001` as admin) still works and those files remain in the repo. `000_setup.sql` supersedes the `CREATE DATABASE` step and `002`.
+> If you forget to pass `-v admin_password=...`, the script falls back to `CHANGE_ME_STRONG_PASSWORD` and prints a warning. Re-run with the real password to rotate it.
 
 ### 4. Configure Firebase (frontend)
 
@@ -129,48 +117,46 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ```
 ├── Backend/
-│   ├── 000_setup.sql                      # One-shot: creates DB, admin role, permissions, extensions
-│   ├── 001_citizen_shield_migration.sql   # Database schema + seed data
-│   ├── 002_create_admin_user.sql          # Legacy: admin role only (superseded by 000_setup.sql)
-│   ├── db.ts                              # PostgreSQL connection pool
-│   ├── server.ts                          # Express app entrypoint
+│   ├── 000_citizen_shield_complete.sql            # One-shot: creates DB, role, permissions, extensions, schema, seed data
+│   ├── db.ts                                      # PostgreSQL connection pool
+│   ├── server.ts                                  # Express app entrypoint
 │   ├── middleware/
-│   │   └── auth.ts                        # Firebase token verification middleware
+│   │   └── auth.ts                                # Firebase token verification middleware
 │   └── routes/
-│       ├── auth.ts                        # POST /api/auth/sync, GET /api/auth/me
-│       ├── regions.ts                     # GET /api/regions, GET /api/regions/:slug, POST /api/regions/:slug/join
-│       ├── posts.ts                       # CRUD for community posts
-│       ├── votes.ts                       # POST/GET /api/posts/:id/vote
-│       ├── moderation.ts                  # GET /api/moderation, POST /api/moderation/:id/review
-│       └── upload.ts                      # POST /api/upload/image (Azure Blob)
+│       ├── auth.ts                                # POST /api/auth/sync, GET /api/auth/me
+│       ├── regions.ts                             # GET /api/regions, GET /api/regions/:slug, POST /api/regions/:slug/join
+│       ├── posts.ts                               # CRUD for community posts
+│       ├── votes.ts                               # POST/GET /api/posts/:id/vote
+│       ├── moderation.ts                          # GET /api/moderation, POST /api/moderation/:id/review
+│       └── upload.ts                              # POST /api/upload/image (Azure Blob)
 ├── src/
-│   ├── main.tsx                           # App entrypoint with AuthProvider
-│   ├── App.tsx                            # Root component with view routing
-│   ├── api.ts                             # Authenticated fetch helper
-│   ├── firebase.ts                        # Firebase client SDK init
-│   ├── types.ts                           # TypeScript interfaces (Post, Region)
-│   ├── data.ts                            # Hardcoded seed data (for frontend)
-│   ├── constants.ts                       # Animation variants
-│   ├── index.css                          # Tailwind config + theme
+│   ├── main.tsx                                   # App entrypoint with AuthProvider
+│   ├── App.tsx                                    # Root component with view routing
+│   ├── api.ts                                     # Authenticated fetch helper
+│   ├── firebase.ts                                # Firebase client SDK init
+│   ├── types.ts                                   # TypeScript interfaces (Post, Region)
+│   ├── data.ts                                    # Hardcoded seed data (for frontend)
+│   ├── constants.ts                               # Animation variants
+│   ├── index.css                                  # Tailwind config + theme
 │   ├── context/
-│   │   └── AuthContext.tsx                # Global auth state (Firebase + backend sync)
+│   │   └── AuthContext.tsx                        # Global auth state (Firebase + backend sync)
 │   ├── components/
-│   │   ├── TopNav.tsx                     # Top navigation with auth UI
-│   │   ├── Sidebar.tsx                    # Desktop sidebar navigation
-│   │   ├── BottomNav.tsx                  # Mobile bottom navigation
-│   │   ├── Chat.tsx                       # Real-time Firestore chat
-│   │   ├── PostForm.tsx                   # Submit community report modal
-│   │   ├── TimelineItem.tsx               # Single post in timeline
-│   │   └── RegionSelector.tsx             # Region picker modal
+│   │   ├── TopNav.tsx                             # Top navigation with auth UI
+│   │   ├── Sidebar.tsx                            # Desktop sidebar navigation
+│   │   ├── BottomNav.tsx                          # Mobile bottom navigation
+│   │   ├── Chat.tsx                               # Real-time Firestore chat
+│   │   ├── PostForm.tsx                           # Submit community report modal
+│   │   ├── TimelineItem.tsx                       # Single post in timeline
+│   │   └── RegionSelector.tsx                     # Region picker modal
 │   └── views/
-│       ├── HubView.tsx                    # Global hub overview
-│       ├── FeedView.tsx                   # Region-specific post feed
-│       └── SafetyView.tsx                 # Safety protocols + resources
-├── firebase-applet-config.json            # Firebase web app config
-├── firebase-blueprint.json                # Firebase project blueprint
-├── firestore.rules                        # Firestore security rules
-├── vite.config.ts                         # Vite config with API proxy
-├── tsconfig.json                          # TypeScript config
+│       ├── HubView.tsx                            # Global hub overview
+│       ├── FeedView.tsx                           # Region-specific post feed
+│       └── SafetyView.tsx                         # Safety protocols + resources
+├── firebase-applet-config.json                    # Firebase web app config
+├── firebase-blueprint.json                        # Firebase project blueprint
+├── firestore.rules                                # Firestore security rules
+├── vite.config.ts                                 # Vite config with API proxy
+├── tsconfig.json                                  # TypeScript config
 └── package.json
 ```
 
