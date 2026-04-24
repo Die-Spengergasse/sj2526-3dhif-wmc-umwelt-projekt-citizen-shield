@@ -45,46 +45,41 @@ Edit `.env` and fill in your credentials:
 
 ### 3. Set up the database
 
-The database setup has three steps. Run them **in order** — each step depends on the previous one.
+The database setup is split into two steps. You only need `psql` and access to the PostgreSQL superuser (typically `postgres`).
 
-#### 3a. Create the database
+#### 3a. Create database, admin role, permissions and extensions
 
-Connect to PostgreSQL as a superuser (typically `postgres`) and create an empty database:
+`Backend/000_setup.sql` is self-contained and idempotent. In one pass it creates the `citizen_shield` database, the `citizen_shield_admin` role (full DDL + DML rights on current and future objects), and installs the required extensions (`pgcrypto`, `earthdistance`) — which require superuser.
+
+Run it as the `postgres` superuser and pass the admin password via `-v`:
 
 ```bash
-psql -h localhost -U postgres -c "CREATE DATABASE citizen_shield;"
+psql -h localhost -U postgres -v admin_password=YourStrongPassword -f Backend/000_setup.sql
 ```
 
-#### 3b. Create the application admin user
+Then put the same password into your `.env` file:
 
-The project ships with a script that creates a dedicated PostgreSQL role (`citizen_shield_admin`) that owns the database and has full DDL + DML rights (CREATE, DROP, ALTER, SELECT, INSERT, UPDATE, DELETE, TRUNCATE) — including on objects created in the future.
+```
+DATABASE_URL=postgres://citizen_shield_admin:<your_password>@localhost:5432/citizen_shield
+```
 
-1. Open `Backend/002_create_admin_user.sql` and replace `CHANGE_ME_STRONG_PASSWORD` with a secure password.
-2. Run the script **as a superuser** against the `postgres` maintenance database (the script switches to `citizen_shield` internally):
+> Re-running the script is safe: if the role or database already exists, the password is updated and ownership is re-applied.
 
-   ```bash
-   psql -h localhost -U postgres -d postgres -f Backend/002_create_admin_user.sql
-   ```
+#### 3b. Run the schema migration
 
-3. Put the same password into your `.env` file:
-
-   ```
-   DATABASE_URL=postgres://citizen_shield_admin:<your_password>@localhost:5432/citizen_shield
-   ```
-
-#### 3c. Run the schema migration
-
-Now run the migration **as the new admin user** so all created objects are owned by `citizen_shield_admin`:
+Now load the schema and seed data **as the new admin user**, so every table, trigger and function is owned by `citizen_shield_admin`:
 
 ```bash
 psql -h localhost -U citizen_shield_admin -d citizen_shield -f Backend/001_citizen_shield_migration.sql
 ```
 
-This creates all tables, enums, indexes, triggers, and seeds initial region data (Nepal, Myanmar, Sudan, Iran, Georgia).
+This creates all tables, enums, indexes, triggers, and seeds initial region data (Nepal, Myanmar, Sudan, Iran, Georgia). The `CREATE EXTENSION` calls inside `001` become no-ops because the extensions were already installed in step 3a.
 
 > **Troubleshooting**
-> - *"permission denied to create extension"* — extensions (`pgcrypto`, `earthdistance`) require superuser rights. Either run step 3c as `postgres`, or have a superuser run the two `CREATE EXTENSION` statements from `001_citizen_shield_migration.sql` once beforehand.
-> - *"role already exists"* — safe to ignore; the admin-user script is idempotent and will `ALTER` the existing role instead.
+> - *"role already exists"* / *"database already exists"* — safe to ignore, `000_setup.sql` is idempotent.
+> - Forgot to pass `-v admin_password=...`? The script falls back to `CHANGE_ME_STRONG_PASSWORD` and prints a warning. Re-run with the real password to rotate it.
+
+> **Legacy note:** the older two-step flow (`002_create_admin_user.sql` against a pre-created database, then `001` as admin) still works and those files remain in the repo. `000_setup.sql` supersedes the `CREATE DATABASE` step and `002`.
 
 ### 4. Configure Firebase (frontend)
 
@@ -134,8 +129,9 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ```
 ├── Backend/
+│   ├── 000_setup.sql                      # One-shot: creates DB, admin role, permissions, extensions
 │   ├── 001_citizen_shield_migration.sql   # Database schema + seed data
-│   ├── 002_create_admin_user.sql          # Creates citizen_shield_admin role with full rights
+│   ├── 002_create_admin_user.sql          # Legacy: admin role only (superseded by 000_setup.sql)
 │   ├── db.ts                              # PostgreSQL connection pool
 │   ├── server.ts                          # Express app entrypoint
 │   ├── middleware/
