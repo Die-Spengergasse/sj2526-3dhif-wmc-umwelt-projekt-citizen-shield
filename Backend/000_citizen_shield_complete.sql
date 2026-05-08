@@ -4,9 +4,9 @@
 -- Datenbank: PostgreSQL 15+
 -- ------------------------------------------------------------
 -- Erstellt in EINEM Durchlauf als PostgreSQL-Superuser:
---   1. Rolle  citizen_shield_admin        (idempotent)
+--   1. Rolle  citizen_shield_user        (idempotent)
 --   2. Datenbank citizen_shield            (idempotent)
---   3. Alle Rechte für citizen_shield_admin auf DB- und Schema-Ebene
+--   3. Alle Rechte für citizen_shield_user auf DB- und Schema-Ebene
 --   4. Default-Rechte für zukünftig erstellte Objekte
 --   5. Extensions pgcrypto und earthdistance (benötigen Superuser)
 --   6. Alle Tabellen, ENUMs, Indexes, Trigger und Seed-Daten
@@ -45,18 +45,18 @@ DO $$
 DECLARE
   pw TEXT := current_setting('citizen_shield.setup_password');
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'citizen_shield_admin') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'citizen_shield_user') THEN
     EXECUTE format(
-      'CREATE ROLE citizen_shield_admin
+      'CREATE ROLE citizen_shield_user
          WITH LOGIN CREATEDB CREATEROLE NOSUPERUSER INHERIT NOREPLICATION
               CONNECTION LIMIT -1 PASSWORD %L', pw);
-    RAISE NOTICE 'Rolle citizen_shield_admin angelegt.';
+    RAISE NOTICE 'Rolle citizen_shield_user angelegt.';
   ELSE
     EXECUTE format(
-      'ALTER ROLE citizen_shield_admin
+      'ALTER ROLE citizen_shield_user
          WITH LOGIN CREATEDB CREATEROLE NOSUPERUSER INHERIT NOREPLICATION
               PASSWORD %L', pw);
-    RAISE NOTICE 'Rolle citizen_shield_admin aktualisiert.';
+    RAISE NOTICE 'Rolle citizen_shield_user aktualisiert.';
   END IF;
 END
 $$;
@@ -65,17 +65,17 @@ $$;
 -- ============================================================
 -- 2. DATENBANK ANLEGEN (idempotent)
 -- ============================================================
-SELECT 'CREATE DATABASE citizen_shield OWNER citizen_shield_admin'
+SELECT 'CREATE DATABASE citizen_shield OWNER citizen_shield_user'
  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'citizen_shield')
 \gexec
 
-ALTER DATABASE citizen_shield OWNER TO citizen_shield_admin;
+ALTER DATABASE citizen_shield OWNER TO citizen_shield_user;
 
 
 -- ============================================================
 -- 3. DATENBANK-RECHTE
 -- ============================================================
-GRANT ALL PRIVILEGES ON DATABASE citizen_shield TO citizen_shield_admin;
+GRANT ALL PRIVILEGES ON DATABASE citizen_shield TO citizen_shield_user;
 
 
 -- ============================================================
@@ -94,36 +94,36 @@ CREATE EXTENSION IF NOT EXISTS "earthdistance" CASCADE;
 -- ============================================================
 -- 6. SCHEMA-RECHTE (public)
 -- ============================================================
-ALTER SCHEMA public OWNER TO citizen_shield_admin;
-GRANT  ALL PRIVILEGES ON SCHEMA public TO citizen_shield_admin;
+ALTER SCHEMA public OWNER TO citizen_shield_user;
+GRANT  ALL PRIVILEGES ON SCHEMA public TO citizen_shield_user;
 
 
 -- ============================================================
 -- 7. RECHTE AUF BEREITS VORHANDENE OBJEKTE
 -- ============================================================
-GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO citizen_shield_admin;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO citizen_shield_admin;
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO citizen_shield_admin;
-GRANT ALL PRIVILEGES ON ALL ROUTINES  IN SCHEMA public TO citizen_shield_admin;
+GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO citizen_shield_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO citizen_shield_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO citizen_shield_user;
+GRANT ALL PRIVILEGES ON ALL ROUTINES  IN SCHEMA public TO citizen_shield_user;
 
 
 -- ============================================================
 -- 8. DEFAULT-RECHTE FÜR ZUKÜNFTIG ERSTELLTE OBJEKTE
 -- ============================================================
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT ALL PRIVILEGES ON TABLES    TO citizen_shield_admin;
+    GRANT ALL PRIVILEGES ON TABLES    TO citizen_shield_user;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT ALL PRIVILEGES ON SEQUENCES TO citizen_shield_admin;
+    GRANT ALL PRIVILEGES ON SEQUENCES TO citizen_shield_user;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT ALL PRIVILEGES ON FUNCTIONS TO citizen_shield_admin;
+    GRANT ALL PRIVILEGES ON FUNCTIONS TO citizen_shield_user;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT ALL PRIVILEGES ON ROUTINES  TO citizen_shield_admin;
+    GRANT ALL PRIVILEGES ON ROUTINES  TO citizen_shield_user;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT ALL PRIVILEGES ON TYPES     TO citizen_shield_admin;
+    GRANT ALL PRIVILEGES ON TYPES     TO citizen_shield_user;
 
 
 -- ============================================================
@@ -476,7 +476,7 @@ INSERT INTO regions (slug, name, intensity, active_hubs, connectivity, descripti
 
 SELECT rolname, rolcanlogin, rolcreatedb, rolcreaterole, rolsuper
 FROM   pg_roles
-WHERE  rolname = 'citizen_shield_admin';
+WHERE  rolname = 'citizen_shield_user';
 
 SELECT datname AS database,
        pg_catalog.pg_get_userbyid(datdba) AS owner
