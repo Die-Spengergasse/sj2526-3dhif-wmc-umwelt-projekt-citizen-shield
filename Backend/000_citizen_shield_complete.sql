@@ -222,12 +222,15 @@ CREATE TABLE regions (
   image_url         TEXT,
   map_image_url     TEXT,
   emergency_contact TEXT,
+  center_lat        DOUBLE PRECISION,
+  center_lng        DOUBLE PRECISION,
   updated_at        TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE  regions              IS 'Aktive Krisenregionen. intensity, active_hubs und connectivity werden vom Backend laufend aktualisiert.';
 COMMENT ON COLUMN regions.slug         IS 'URL-freundlicher Identifier – wird als Firestore Collection-Key für region_status verwendet.';
 COMMENT ON COLUMN regions.connectivity IS 'Prozentsatz 0–100. Wird auch in Firestore region_status gespiegelt für Live-Updates.';
+COMMENT ON COLUMN regions.center_lat   IS 'Geographisches Zentrum (typischerweise Hauptstadt). Wird für Distanz-basierte Moderation verwendet.';
 
 
 -- ============================================================
@@ -460,12 +463,12 @@ CREATE TRIGGER trg_create_verification_stats
 -- 25. SEED DATA: Initiale Regionen
 -- ============================================================
 
-INSERT INTO regions (slug, name, intensity, active_hubs, connectivity, description, emergency_contact) VALUES
-  ('nepal',   'NEPAL',   'CRITICAL', 14, 62, 'Community-led support networks are active across the Kathmandu Valley.',       '+977 1-4200105'),
-  ('myanmar', 'MYANMAR', 'HIGH',     28, 45, 'Civil Disobedience Movement nodes are coordinating essential services.',        'Signal: @MyanmarAid_Bot'),
-  ('sudan',   'SUDAN',   'CRITICAL', 12, 38, 'Resistance Committees are managing neighborhood-level aid distribution.',       'WhatsApp: +249 912 345 678'),
-  ('iran',    'IRAN',    'HIGH',     42, 55, 'Decentralized networks are providing critical updates on internet blackouts.',   'Telegram: @IranFreedom_Support'),
-  ('georgia', 'GEORGIA', 'ALERT',    18, 88, 'Monitoring legislative developments and coordinating peaceful assemblies.',     '+995 32 2 123 456');
+INSERT INTO regions (slug, name, intensity, active_hubs, connectivity, description, emergency_contact, center_lat, center_lng) VALUES
+  ('nepal',   'NEPAL',   'CRITICAL', 14, 62, 'Community-led support networks are active across the Kathmandu Valley.',       '+977 1-4200105',           27.7172, 85.3240),
+  ('myanmar', 'MYANMAR', 'HIGH',     28, 45, 'Civil Disobedience Movement nodes are coordinating essential services.',        'Signal: @MyanmarAid_Bot',  16.8409, 96.1735),
+  ('sudan',   'SUDAN',   'CRITICAL', 12, 38, 'Resistance Committees are managing neighborhood-level aid distribution.',       'WhatsApp: +249 912 345 678', 15.5007, 32.5599),
+  ('iran',    'IRAN',    'HIGH',     42, 55, 'Decentralized networks are providing critical updates on internet blackouts.',   'Telegram: @IranFreedom_Support', 35.6892, 51.3890),
+  ('georgia', 'GEORGIA', 'ALERT',    18, 88, 'Monitoring legislative developments and coordinating peaceful assemblies.',     '+995 32 2 123 456',        41.7151, 44.8271);
 
 
 -- ============================================================

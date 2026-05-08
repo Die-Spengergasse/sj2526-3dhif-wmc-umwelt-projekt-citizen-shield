@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { BlobServiceClient } from '@azure/storage-blob';
 import { verifyToken, AuthRequest } from '../middleware/auth';
+import sharp from 'sharp';
 import crypto from 'crypto';
 import path from 'path';
 
@@ -38,6 +39,9 @@ uploadRouter.post(
     }
 
     try {
+      // Strip EXIF (incl. GPS) and apply orientation. sharp drops metadata by default.
+      const sanitized = await sharp(req.file.buffer).rotate().toBuffer();
+
       const containerName = process.env.AZURE_STORAGE_CONTAINER || 'citizen-shield-images';
       const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
       const blobName = `posts/${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
@@ -46,7 +50,7 @@ uploadRouter.post(
       const containerClient = blobServiceClient.getContainerClient(containerName);
       const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
-      await blockBlobClient.uploadData(req.file.buffer, {
+      await blockBlobClient.uploadData(sanitized, {
         blobHTTPHeaders: { blobContentType: req.file.mimetype },
       });
 

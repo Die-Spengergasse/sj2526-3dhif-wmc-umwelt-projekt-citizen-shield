@@ -128,35 +128,64 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
     }
     const userId = userRes.rows[0].id;
 
-    const regionRes = await client.query('SELECT id FROM regions WHERE slug = $1', [regionSlug]);
+    const regionRes = await client.query(
+      'SELECT id, center_lat, center_lng FROM regions WHERE slug = $1',
+      [regionSlug]
+    );
     if (!regionRes.rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Region not found' });
     }
-    const regionId = regionRes.rows[0].id;
+    const { id: regionId, center_lat: centerLat, center_lng: centerLng } = regionRes.rows[0];
 
     // Blur public coordinates to ~1.1 km (2 decimal places)
     const publicLat = locationLat != null ? Math.round(locationLat * 100) / 100 : null;
     const publicLng = locationLng != null ? Math.round(locationLng * 100) / 100 : null;
 
+    // Distance-based moderation: flag posts >5 km from the region center.
+    const DISTANCE_THRESHOLD_M = 5000;
+    let distanceM: number | null = null;
+    if (locationLat != null && locationLng != null && centerLat != null && centerLng != null) {
+      const distRes = await client.query<{ m: number }>(
+        `SELECT earth_distance(ll_to_earth($1, $2), ll_to_earth($3, $4))::int AS m`,
+        [locationLat, locationLng, centerLat, centerLng]
+      );
+      distanceM = distRes.rows[0].m;
+    }
+    const flagged = distanceM != null && distanceM > DISTANCE_THRESHOLD_M;
+    const postStatus = flagged ? 'pending_review' : 'live';
+    const locStatus = flagged
+      ? 'pending_review'
+      : locationLat != null ? 'verified' : 'none';
+
     const postRes = await client.query<{ id: string }>(
       `INSERT INTO posts
          (region_id, author_id, title, description, type, image_url,
-          location_lat, location_lng, location_source,
+          location_lat, location_lng, location_source, location_distance_m,
           location_public_lat, location_public_lng, location_label, location_status,
           post_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'live')
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING id`,
       [
         regionId, userId, title, description, type, imageUrl ?? null,
         locationLat ?? null, locationLng ?? null,
         locationLat != null ? 'manual' : null,
+        distanceM,
         publicLat, publicLng, locationLabel ?? null,
-        locationLat != null ? 'verified' : 'none',
+        locStatus,
+        postStatus,
       ]
     );
 
     const postId = postRes.rows[0].id;
+
+    if (flagged) {
+      await client.query(
+        `INSERT INTO moderation_queue (post_id, reason, distance_m)
+         VALUES ($1, 'distance_exceeded', $2)`,
+        [postId, distanceM]
+      );
+    }
 
     if (tags?.length) {
       const tagValues = tags.map((_, i) => `($1, $${i + 2})`).join(', ');
@@ -167,7 +196,7 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
     }
 
     await client.query('COMMIT');
-    return res.status(201).json({ id: postId });
+    return res.status(201).json({ id: postId, status: postStatus, distanceM });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('POST /posts error', err);
