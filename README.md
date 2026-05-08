@@ -169,7 +169,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 - **Posts** — Create posts with location blurring (~1 km precision), list posts with filtering (by region, status, tag), get single post, delete posts (author or moderator)
 - **Voting** — Upvote/downvote with upsert logic, vote removal, DB triggers that auto-sync denormalized counts
 - **Moderation** — Queue for flagged posts, moderator-only access, approve/reject workflow that updates post status
-- **Image upload** — Multipart upload to Azure Blob Storage with file type validation (JPEG, PNG, WebP) and 10 MB limit
+- **Distance-based moderation** — Posts whose user-supplied GPS is more than 5 km from the region center are auto-flagged as `pending_review` and inserted into `moderation_queue` (uses the `earthdistance` extension and the seeded `regions.center_lat` / `center_lng`)
+- **Image upload** — Multipart upload to Azure Blob Storage with file type validation (JPEG, PNG, WebP) and 10 MB limit; images are run through `sharp` to apply EXIF orientation and strip all metadata (incl. GPS) before upload
 - **Database** — Full PostgreSQL schema with enums, foreign keys, indexes, triggers for `updated_at` and vote count sync, audit trail for verification badges
 
 ### Frontend (React)
@@ -185,37 +186,41 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## What Needs to Be Implemented
 
-### Frontend — Backend Integration
+### Next up (highest priority)
 
-The frontend currently uses hardcoded data from `src/data.ts`. The following needs to be connected to the backend API using `src/api.ts`:
-
-- [ ] **Fetch regions from API** — Replace `INITIAL_REGIONS` with `GET /api/regions` data on app load
-- [ ] **Fetch posts from API** — Replace `INITIAL_POSTS` with `GET /api/posts?regionSlug=...`
-- [ ] **Submit posts via API** — Wire `PostForm` to `POST /api/posts` instead of local state
-- [ ] **Voting UI** — Add upvote/downvote buttons to `TimelineItem`, call `POST /api/posts/:id/vote`
-- [ ] **Image upload** — Replace the URL text input in `PostForm` with file upload via `POST /api/upload/image`
-- [ ] **Join region** — Wire "Offer Support" button to `POST /api/regions/:slug/join`
+- [ ] **Geolocation capture in `PostForm`** — call `navigator.geolocation.getCurrentPosition` and pass `locationLat` / `locationLng` to `POST /api/posts`. **This is the missing piece that makes the existing distance-based moderation actually fire** — without GPS from the client, every post still goes live.
+- [ ] **Seed data for safe zones and resources** — `region_safe_zones` and `region_resources` are empty, so the region detail panels render blank lists.
+- [ ] **Moderation dashboard UI** — backend endpoints (`GET /api/moderation`, `POST /api/moderation/:id/review`) are done; a moderator-only view in the frontend is the next step so flagged posts can actually be reviewed.
 
 ### Frontend — New Features
 
-- [ ] **URL routing** — Add `react-router-dom` for real navigation (bookmarkable URLs, browser back/forward)
-- [ ] **Moderation dashboard** — UI for moderators to review flagged posts (`GET /api/moderation`, `POST /api/moderation/:id/review`)
-- [ ] **User profile page** — Display user info, verification badge, post history
-- [ ] **Loading states** — Spinners/skeletons while fetching data from the API
-- [ ] **Error handling** — Toast notifications for failed API calls, error boundaries
-- [ ] **Search and filtering** — Post filtering by type/tag in the feed view
+- [ ] **URL routing** — Add `react-router-dom` for real navigation (bookmarkable URLs, browser back/forward); `App.tsx` currently switches views via a `currentView` string.
+- [ ] **User profile page** — Display user info, verification badge, post history (backend already has `GET /api/auth/me`).
+- [ ] **Error handling** — Toast notifications for failed API calls, error boundaries; today failures only `console.error`.
+- [ ] **Search and filtering** — Post filtering by type / tag in the feed view.
+- [ ] **Wire dead action buttons** — "Request Emergency Aid" and "Volunteer for Local Hub" in `App.tsx` have no `onClick` yet.
+- [ ] **Footer links** — currently all `href="#"`.
 
 ### Backend — Missing Logic
 
-- [ ] **EXIF stripping** — The upload route stores raw image buffers; add EXIF removal (e.g. using `sharp`) before uploading to Azure
-- [ ] **Distance-based moderation** — Calculate distance between user GPS coordinates and region; auto-flag posts with >5 km discrepancy into `moderation_queue`
-- [ ] **Verification stats recalculation** — Implement periodic or event-driven recalculation of `user_verification_stats` (qualifying posts, badge eligibility)
-- [ ] **Input validation** — Validate title length (5–200 chars) and description length (10–2000 chars) in the posts route before hitting DB constraints
-- [ ] **Rate limiting** — Add rate limiting middleware to prevent abuse
-- [ ] **Seed data for safe zones and resources** — The SQL migration seeds regions but not `region_safe_zones` or `region_resources` tables
+- [ ] **Verification stats recalculation** — Implement periodic or event-driven recalculation of `user_verification_stats` (qualifying posts, badge eligibility).
+- [ ] **Input validation** — Validate title length (5–200 chars) and description length (10–2000 chars) in the posts route before hitting DB constraints.
+- [ ] **Rate limiting** — Add rate limiting middleware to prevent abuse.
 
 ### Infrastructure
 
-- [ ] **Tests** — No test files exist yet; add unit and integration tests
-- [ ] **CI/CD** — Set up a pipeline for linting, testing, and deployment
-- [ ] **Production build for backend** — Currently runs via `tsx`; add a proper build step for production
+- [ ] **Tests** — No test files exist yet; add unit and integration tests.
+- [ ] **CI/CD** — Set up a pipeline for linting, testing, and deployment.
+- [ ] **Production build for backend** — Currently runs via `tsx`; add a proper `tsc` build step for production.
+
+### Recently completed
+
+- [x] Fetch regions / region detail / posts from the API (`App.tsx`)
+- [x] Submit posts via `POST /api/posts` (`PostForm` → `App.tsx#handleNewPost`)
+- [x] Vote buttons on `TimelineItem` wired to `POST /api/posts/:id/vote`
+- [x] File-upload image picker in `PostForm` via `POST /api/upload/image`
+- [x] "Offer Support" button wired to `POST /api/regions/:slug/join`
+- [x] Loading spinners while posts/regions are fetched
+- [x] EXIF stripping via `sharp` in the upload route
+- [x] Distance-based moderation (`earthdistance` + `moderation_queue` insert) in the posts route
+- [x] `regions.center_lat` / `center_lng` columns and seed data for the 5 regions
