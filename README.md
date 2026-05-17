@@ -8,7 +8,7 @@ Built with React + Vite (frontend), Express + PostgreSQL (backend), and Firebase
 
 | Layer      | Technology                                                   |
 |------------|--------------------------------------------------------------|
-| Frontend   | React 19, TypeScript, Tailwind CSS v4, Framer Motion         |
+| Frontend   | React 19, TypeScript, Vite, inline CSS (warm editorial design) |
 | Backend    | Express.js, PostgreSQL, Firebase Admin SDK                   |
 | Auth       | Firebase Authentication (Google OAuth)                       |
 | Chat       | Cloud Firestore (real-time)                                  |
@@ -131,27 +131,35 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 │       └── upload.ts                              # POST /api/upload/image (Azure Blob)
 ├── src/
 │   ├── main.tsx                                   # App entrypoint with AuthProvider
-│   ├── App.tsx                                    # Root component with view routing
-│   ├── api.ts                                     # Authenticated fetch helper
+│   ├── App.tsx                                    # Root component — real auth + view routing
+│   ├── api.ts                                     # Authenticated fetch helper + API wrappers
 │   ├── firebase.ts                                # Firebase client SDK init
-│   ├── types.ts                                   # TypeScript interfaces (Post, Region)
-│   ├── data.ts                                    # Hardcoded seed data (for frontend)
-│   ├── constants.ts                               # Animation variants
-│   ├── index.css                                  # Tailwind config + theme
+│   ├── types.ts                                   # TypeScript interfaces (Post, Region, AppUser …)
+│   ├── design-tokens.ts                           # S palette, INTENSITY, REGION_COORDS
+│   ├── motion.tsx                                 # Reveal, CountUp, Skeleton, Toaster, LiveDot …
+│   ├── index.css                                  # Global CSS + keyframe animations
 │   ├── context/
 │   │   └── AuthContext.tsx                        # Global auth state (Firebase + backend sync)
 │   ├── components/
-│   │   ├── TopNav.tsx                             # Top navigation with auth UI
-│   │   ├── Sidebar.tsx                            # Desktop sidebar navigation
-│   │   ├── BottomNav.tsx                          # Mobile bottom navigation
-│   │   ├── Chat.tsx                               # Real-time Firestore chat
-│   │   ├── PostForm.tsx                           # Submit community report modal
-│   │   ├── TimelineItem.tsx                       # Single post in timeline
-│   │   └── RegionSelector.tsx                     # Region picker modal
+│   │   ├── Wordmark.tsx                           # Shield logo + logotype
+│   │   ├── TopNav.tsx                             # Top navigation with notifications + auth UI
+│   │   ├── Sidebar.tsx                            # No-op (navigation is in TopNav)
+│   │   ├── BottomNav.tsx                          # Mobile bottom navigation (5 views)
+│   │   ├── LiveTicker.tsx                         # Fixed newsroom tape (region signals)
+│   │   ├── SignInModal.tsx                        # Google sign-in overlay
+│   │   ├── Chat.tsx                               # Local-state per-region chat panel
+│   │   ├── PostForm.tsx                           # 2-step submit community report modal
+│   │   ├── TimelineItem.tsx                       # Post card with vote + pin + VoterPopover
+│   │   ├── RegionSelector.tsx                     # Region picker overlay
+│   │   ├── RegionMapCard.tsx                      # Leaflet map inset (CartoDB tiles)
+│   │   └── ActionButton.tsx                       # Bordered action button with hover slide
 │   └── views/
-│       ├── HubView.tsx                            # Global hub overview
-│       ├── FeedView.tsx                           # Region-specific post feed
-│       └── SafetyView.tsx                         # Safety protocols + resources
+│       ├── HubView.tsx                            # Global hub — stats, region grid, resources
+│       ├── FeedView.tsx                           # Region feed with filter tabs + sidebar
+│       ├── SafetyView.tsx                         # Safety protocols + emergency contact
+│       ├── RegionsView.tsx                        # Region carousel + timeline + map sidebar
+│       ├── CommunityView.tsx                      # Pinned posts + DiscussionDrawer
+│       └── GlobeView.tsx                          # Three.js interactive globe (topojson land)
 ├── firebase-applet-config.json                    # Firebase web app config
 ├── firebase-blueprint.json                        # Firebase project blueprint
 ├── firestore.rules                                # Firestore security rules
@@ -175,14 +183,17 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Frontend (React)
 
-- **Google authentication** — Global `AuthContext` with Firebase Google OAuth, automatic backend sync on login, sign-in/sign-out UI in TopNav (with dropdown showing user stats) and Sidebar
-- **Region carousel** — Browse 5 crisis regions with animated transitions, stats cards (intensity, hubs, connectivity), emergency contacts, safe zones, resources
-- **Timeline feed** — Chronological post display per region with type indicators (critical, info, broadcast), images, and tags
-- **Post form** — Modal to submit community reports with type selector, title, description, and image URL
-- **Real-time chat** — Per-region Firestore chat with Google auth, message bubbles, user avatars
-- **Multiple views** — Hub (global overview), Regions (country timelines), Feed (filtered posts), Safety (protocols + guides)
-- **Responsive layout** — Desktop sidebar + top nav, mobile bottom nav
-- **Animations** — Page transitions, carousel, hover effects via Framer Motion
+- **Google authentication** — Global `AuthContext` with Firebase Google OAuth, automatic backend sync on login, sign-in/sign-out UI in TopNav (dropdown with user stats + verification badge)
+- **Warm editorial design** — Full design migration from prototype: paper palette (`#f0e9da`/`#fbf7ec`), Instrument Serif headlines, Plus Jakarta Sans body, JetBrains Mono mono, warm-sepia CSS filters
+- **Design tokens** — `src/design-tokens.ts` exports `S` (colour palette), `INTENSITY` (per-level colours + tones), `REGION_COORDS` (Leaflet fallback positions)
+- **Motion library** — `src/motion.tsx` exports `Reveal`, `CountUp`, `Skeleton`, `AmbientGlow`, `IntensityRing`, `LiveDot`, `Toaster` + `showToast`, `useNow`, `parseRelative`, `formatRelative`
+- **Six views** — Hub (network stats + region grid), Globe (Three.js interactive Earth), Regions (carousel + community tools + Leaflet map), Feed (filtered timeline), Safety (protocols + resources), Community (pinned posts + DiscussionDrawer)
+- **Interactive globe** — Three.js sphere with topojson-derived continent point-cloud, orbit controls with auto-rotate, crisis-pin raycasting, click-to-navigate to Regions view
+- **Community features** — Pin posts to regional discussion boards, DiscussionDrawer with threaded comments (local state), optimistic voting with background API call
+- **Live ticker** — Fixed newsroom tape below TopNav showing region signals in real time
+- **Responsive layout** — Desktop top nav, mobile 5-item bottom nav
+- **Notifications** — Bell dropdown with live relative timestamps (via `useNow`), mark-read per item or all
+- **Inline CSS** — All components use `style={{}}` props; only utility CSS classes (`.lift`, `.warm-pulse`, `.cs-drawer-in`, `.cs-ticker-scroll`, `.reveal-fade`, etc.) come from `index.css`
 
 ## What Needs to Be Implemented
 
@@ -215,12 +226,18 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Recently completed
 
-- [x] Fetch regions / region detail / posts from the API (`App.tsx`)
-- [x] Submit posts via `POST /api/posts` (`PostForm` → `App.tsx#handleNewPost`)
-- [x] Vote buttons on `TimelineItem` wired to `POST /api/posts/:id/vote`
+- [x] **Full design migration** — All 12 prototype files in `src/design-import/` integrated and deleted
+- [x] **Design tokens** — `src/design-tokens.ts` (S palette, INTENSITY, REGION_COORDS)
+- [x] **Motion library** — `src/motion.tsx` (Reveal, CountUp, Skeleton, IntensityRing, Toaster…)
+- [x] **All components rewritten** — Wordmark, TopNav, BottomNav, LiveTicker, SignInModal, Chat, PostForm, TimelineItem, RegionSelector, RegionMapCard, ActionButton
+- [x] **All views rewritten** — HubView, FeedView, SafetyView, RegionsView, CommunityView, GlobeView
+- [x] **App.tsx rewrite** — Real Firebase auth, real API calls, optimistic votes, all 6 views, notifications
+- [x] Fetch regions / region detail / posts from the API
+- [x] Submit posts via `POST /api/posts` with optimistic fallback
+- [x] Vote buttons wired to `POST /api/posts/:id/vote` (optimistic local + background call)
 - [x] File-upload image picker in `PostForm` via `POST /api/upload/image`
 - [x] "Offer Support" button wired to `POST /api/regions/:slug/join`
-- [x] Loading spinners while posts/regions are fetched
 - [x] EXIF stripping via `sharp` in the upload route
 - [x] Distance-based moderation (`earthdistance` + `moderation_queue` insert) in the posts route
 - [x] `regions.center_lat` / `center_lng` columns and seed data for the 5 regions
+- [x] Deleted `src/data.ts`, `src/constants.ts`, `src/design-import/`

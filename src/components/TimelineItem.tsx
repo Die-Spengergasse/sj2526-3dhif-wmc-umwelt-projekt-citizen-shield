@@ -1,123 +1,182 @@
-import React from 'react';
-import { motion } from 'motion/react';
-import { ThumbsUp, ThumbsDown, Verified } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { AlertTriangle, Info, Radio, ThumbsUp, ThumbsDown, CircleCheck, Flag } from 'lucide-react';
+import { S } from '../design-tokens';
+import { Post, Voter } from '../types';
 
-interface TimelineItemProps {
-  id: string;
-  time: string;
-  title: string;
-  description: string;
-  type: 'critical' | 'info' | 'broadcast';
-  image?: string;
-  tags?: string[];
-  upvoteCount: number;
-  downvoteCount: number;
-  author?: {
-    id: string;
-    displayName: string;
-    avatarUrl: string | null;
-    isVerified: boolean;
-  };
-  onVote?: (postId: string, voteType: 'upvote' | 'downvote') => void;
+interface VoterPopoverProps {
+  voters: Voter[];
+  type: 'upvote' | 'downvote';
+  onClose: () => void;
 }
 
-export const TimelineItem: React.FC<TimelineItemProps> = ({
-  id, time, title, description, type, image, tags,
-  upvoteCount, downvoteCount, author, onVote,
-}) => {
-  const borderColor = {
-    critical: 'border-primary',
-    info: 'border-secondary',
-    broadcast: 'border-tertiary'
-  }[type];
-
-  const dotColor = {
-    critical: 'bg-primary-dim',
-    info: 'bg-secondary',
-    broadcast: 'bg-tertiary'
-  }[type];
-
-  const bgColor = type === 'broadcast' ? 'bg-surface-container-low' : 'bg-surface-container';
+const VoterPopover: React.FC<VoterPopoverProps> = ({ voters, type, onClose }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [onClose]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      whileInView={{ opacity: 1, x: 0 }}
-      viewport={{ once: true }}
-      className="relative pl-12 mb-12"
-    >
-      <div className={`absolute left-0 top-1.5 w-6 h-6 rounded-full ${dotColor} border-4 border-background z-10 shadow-sm`} />
+    <div ref={ref} className="reveal-fade" style={{
+      position: 'absolute', zIndex: 30, bottom: 36, left: 0, borderRadius: 14, overflow: 'hidden', width: 220,
+      background: S.paper, border: `1px solid ${S.rule}`,
+      boxShadow: '0 24px 60px -12px rgba(89,46,28,0.32)',
+    }}>
+      <div style={{ padding: '12px 16px 10px', borderBottom: `1px solid ${S.ruleSoft}` }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: S.ash, textTransform: 'uppercase', letterSpacing: '0.14em' }}>
+          {type === 'upvote' ? 'Upvoted by' : 'Downvoted by'}
+        </p>
+      </div>
+      <div style={{ padding: 6, maxHeight: 200, overflowY: 'auto' }}>
+        {!voters?.length ? (
+          <p style={{ fontSize: 11, color: S.ash, textAlign: 'center', padding: '12px 0' }}>No votes yet</p>
+        ) : voters.slice(0, 8).map(v => (
+          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8 }}>
+            <div style={{
+              width: 24, height: 24, borderRadius: '50%',
+              background: `linear-gradient(135deg, ${S.primary} 0%, ${S.primaryDim} 100%)`,
+              color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, flexShrink: 0,
+            }}>{v.displayName?.[0]?.toUpperCase() || '?'}</div>
+            <span style={{ fontSize: 12, fontWeight: 500, color: S.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{v.displayName}</span>
+            {v.isVerified && <CircleCheck size={11} style={{ color: S.secondary, flexShrink: 0 }}/>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
-      <div className={`${bgColor} rounded-xl p-8 border-l-4 ${borderColor} border-y border-r border-black/5`}>
-        <div className="flex justify-between items-start mb-4">
-          <span className={`text-xs font-bold font-headline uppercase tracking-widest ${
-            type === 'critical' ? 'text-primary' : type === 'info' ? 'text-secondary' : 'text-on-surface-variant'
-          }`}>
-            {time}
-          </span>
+interface TimelineItemProps {
+  post: Post;
+  onVote?: (postId: string, voteType: 'upvote' | 'downvote') => void;
+  onPin?: (post: Post) => void;
+  isPinnedToCommunity?: boolean;
+  currentUser?: { uid: string } | null;
+}
+
+export const TimelineItem: React.FC<TimelineItemProps> = ({ post, onVote, onPin, isPinnedToCommunity }) => {
+  const { id, time, title, description, type, image, tags, upvoteCount, downvoteCount, userVote, author, upvoters = [], downvoters = [] } = post;
+  const [openPopover, setOpenPopover] = useState<'upvote' | 'downvote' | null>(null);
+
+  const typeConfig = {
+    critical:  { color: S.primary,   tone: 'rgba(164,74,58,0.10)',  label: 'Critical',  Icon: AlertTriangle },
+    info:      { color: S.secondary, tone: 'rgba(61,107,120,0.10)', label: 'Info',      Icon: Info },
+    broadcast: { color: S.tertiary,  tone: 'rgba(122,142,90,0.10)', label: 'Broadcast', Icon: Radio },
+  } as const;
+  const tc = typeConfig[type] || typeConfig.info;
+
+  return (
+    <article style={{
+      position: 'relative', marginBottom: 14, borderRadius: 14, overflow: 'visible',
+      background: S.paper, border: `1px solid ${S.rule}`,
+      transition: 'transform 280ms cubic-bezier(.2,.7,.2,1), box-shadow 280ms cubic-bezier(.2,.7,.2,1), border-color 280ms ease',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 14px 40px -16px rgba(89,46,28,0.24)'; e.currentTarget.style.borderColor = S.ruleMd; }}
+    onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = S.rule; }}>
+      <span style={{
+        position: 'absolute', left: 0, top: 14, bottom: 14, width: 3, borderRadius: '0 3px 3px 0',
+        background: tc.color, opacity: type === 'critical' ? 1 : 0.7,
+      }}/>
+      <div style={{ padding: '18px 20px 14px 22px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ display: 'inline-flex', color: tc.color }}><tc.Icon size={14}/></span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: tc.color, textTransform: 'uppercase', letterSpacing: '0.14em' }}>{tc.label}</span>
+            <span style={{ fontSize: 11, color: S.ash, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '-0.02em' }}>· {time}</span>
+          </div>
           {author && (
-            <div className="flex items-center gap-2">
-              {author.avatarUrl && (
-                <img
-                  src={author.avatarUrl}
-                  alt={author.displayName}
-                  className="w-5 h-5 rounded-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              )}
-              <span className="text-xs font-bold text-on-surface-variant">{author.displayName}</span>
-              {author.isVerified && <Verified size={12} className="text-secondary" />}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              <div style={{
+                width: 22, height: 22, borderRadius: '50%',
+                background: `linear-gradient(135deg, ${S.primary}30, ${S.primary}10)`,
+                color: S.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700,
+              }}>{author.displayName?.[0]?.toUpperCase() || '?'}</div>
+              <span style={{ fontSize: 11.5, color: S.muted, fontWeight: 500 }}>{author.displayName}</span>
+              {author.isVerified && <CircleCheck size={11} style={{ color: S.secondary }}/>}
             </div>
           )}
         </div>
 
-        <h4 className={`text-2xl font-bold font-headline mb-4 ${type === 'broadcast' ? 'italic' : ''}`}>
+        <h4 style={{
+          fontFamily: type === 'broadcast' ? "'Instrument Serif', Georgia, serif" : "'Plus Jakarta Sans', sans-serif",
+          fontSize: type === 'broadcast' ? 22 : 17,
+          fontWeight: type === 'broadcast' ? 400 : 700,
+          fontStyle: type === 'broadcast' ? 'italic' : 'normal',
+          color: S.ink, letterSpacing: '-0.015em', lineHeight: 1.25, marginBottom: 8, marginTop: 0,
+        }}>
           {type === 'broadcast' ? `"${title}"` : title}
         </h4>
 
-        <p className={`text-on-surface-variant leading-relaxed ${image ? 'mb-6' : ''} ${type === 'broadcast' ? 'italic text-lg' : ''}`}>
+        <p style={{ fontSize: 13.5, color: S.inkSoft, lineHeight: 1.65, marginBottom: (image || tags?.length) ? 12 : 0 }}>
           {description}
         </p>
 
         {image && (
-          <div className="rounded-lg overflow-hidden h-48 w-full bg-surface-container-highest mb-4">
-            <img
-              className="w-full h-full object-cover grayscale opacity-80"
-              src={image}
-              alt={title}
-              referrerPolicy="no-referrer"
-            />
+          <div style={{ borderRadius: 10, overflow: 'hidden', height: 180, background: S.paperLo, marginBottom: 12 }}>
+            <img src={image} alt={title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer"/>
           </div>
         )}
 
-        {tags && (
-          <div className="mb-4 flex gap-2">
+        {tags && tags.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
             {tags.map(tag => (
-              <span key={tag} className="px-2 py-1 bg-surface-container text-[10px] text-on-surface-variant rounded">
-                #{tag}
-              </span>
+              <span key={tag} style={{
+                fontSize: 10, fontWeight: 600, color: S.muted, background: S.paperHi,
+                padding: '3px 9px', borderRadius: 30, letterSpacing: '0.02em', border: `1px solid ${S.ruleSoft}`,
+              }}>#{tag}</span>
             ))}
           </div>
         )}
 
-        {/* Voting */}
-        <div className="flex items-center gap-4 pt-4 border-t border-black/5">
-          <button
-            onClick={() => onVote?.(id, 'upvote')}
-            className="flex items-center gap-1.5 text-sm font-bold text-on-surface-variant hover:text-secondary transition-colors group"
-          >
-            <ThumbsUp size={16} className="group-hover:scale-110 transition-transform" />
-            <span>{upvoteCount}</span>
-          </button>
-          <button
-            onClick={() => onVote?.(id, 'downvote')}
-            className="flex items-center gap-1.5 text-sm font-bold text-on-surface-variant hover:text-error transition-colors group"
-          >
-            <ThumbsDown size={16} className="group-hover:scale-110 transition-transform" />
-            <span>{downvoteCount}</span>
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 12, borderTop: `1px solid ${S.ruleSoft}` }}>
+          {([
+            { kind: 'upvote'   as const, count: upvoteCount,   Icon: ThumbsUp,   voters: upvoters,   activeColor: S.secondary },
+            { kind: 'downvote' as const, count: downvoteCount, Icon: ThumbsDown, voters: downvoters, activeColor: S.primary   },
+          ]).map(({ kind, count, Icon, voters: vl, activeColor }) => {
+            const isActive = userVote === kind;
+            return (
+              <div key={kind} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <button onClick={() => onVote?.(id, kind)}
+                  style={{
+                    width: 30, height: 28, borderRadius: 8, border: 'none', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'transparent', color: isActive ? activeColor : S.ash, transition: 'all 180ms ease',
+                  }}>
+                  <Icon size={14}/>
+                </button>
+                <button onClick={e => { e.stopPropagation(); setOpenPopover(p => p === kind ? null : kind); }}
+                  style={{
+                    minWidth: 24, padding: '0 6px', height: 28, borderRadius: 8, border: 'none', cursor: 'pointer',
+                    fontSize: 12, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace",
+                    background: 'transparent', color: isActive ? activeColor : S.muted, transition: 'all 180ms ease',
+                  }}>
+                  {count}
+                </button>
+                {openPopover === kind && (
+                  <VoterPopover voters={vl} type={kind} onClose={() => setOpenPopover(null)}/>
+                )}
+              </div>
+            );
+          })}
+          {onPin && (
+            <button onClick={() => onPin(post)}
+              style={{
+                marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 10px', height: 28, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 10.5, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
+                color: isPinnedToCommunity ? S.primary : S.muted,
+                background: isPinnedToCommunity ? 'rgba(164,74,58,0.10)' : 'transparent',
+                border: `1px solid ${isPinnedToCommunity ? 'rgba(164,74,58,0.35)' : S.rule}`,
+                transition: 'all 180ms ease',
+              }}>
+              <Flag size={11}/>
+              <span>{isPinnedToCommunity ? 'Pinned' : 'Pin'}</span>
+            </button>
+          )}
         </div>
       </div>
-    </motion.div>
+    </article>
   );
 };

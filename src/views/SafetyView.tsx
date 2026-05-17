@@ -1,198 +1,167 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import { 
-  ShieldCheck, 
-  AlertTriangle, 
-  Heart, 
-  Users, 
-  Info, 
-  CheckCircle2,
-  FileText,
-  Lock,
-  Smartphone,
-  MapPin,
-  PhoneCall
-} from 'lucide-react';
+import { ShieldCheck, Lock, CheckCircle2, MapPin, PhoneCall, Heart } from 'lucide-react';
+import { S } from '../design-tokens';
+import { Reveal, AmbientGlow } from '../motion';
 import { Region } from '../types';
-import { carouselVariants } from '../constants';
 
 interface SafetyViewProps {
   activeRegion: Region;
-  direction: number;
 }
 
-export const SafetyView = ({ activeRegion, direction }: SafetyViewProps) => {
-  return (
-    <div className="space-y-12">
-      <AnimatePresence mode="wait" custom={direction}>
-        <motion.div
-          key={activeRegion.id}
-          custom={direction}
-          variants={carouselVariants}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={{
-            x: { type: "spring", stiffness: 300, damping: 30 },
-            opacity: { duration: 0.2 }
-          }}
-          className="space-y-12"
-        >
-          <header>
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-              <div>
-                <div className="flex items-center gap-3 mb-4">
-                  <span className="bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white rounded-full shadow-sm">Safety Protocol</span>
-                  <span className="text-on-surface-variant text-xs flex items-center gap-2 uppercase font-bold tracking-widest">
-                    <MapPin size={12} />
-                    {activeRegion.name} Local Guidelines
-                  </span>
-                </div>
-                <h1 className="text-6xl md:text-8xl font-black font-headline tracking-tighter text-on-surface leading-none mb-4 uppercase">SAFETY HUB</h1>
-                <p className="text-xl text-on-surface-variant max-w-xl">
-                  Essential safety protocols, emergency guides, and mutual aid resources for community protection and resilience in {activeRegion.name}.
-                </p>
-              </div>
-            </div>
-          </header>
+const protocols = [
+  { t: 'Check-in with Local Hub',  d: 'Notify your community hub of your status and location at least daily.' },
+  { t: 'Verified Information Only', d: 'Only share information cross-verified by two community nodes.' },
+  { t: 'Emergency Supplies',        d: 'Keep first aid, water, and non-perishable food accessible.' },
+  { t: 'Cluster Movement',          d: 'Stay within community clusters — avoid moving alone after dark.' },
+];
+const digital = [
+  { t: 'Secure Communication', d: 'Use encrypted messaging for all community coordination.' },
+  { t: 'Metadata Protection',  d: 'Remove EXIF data from photos before sharing on the feed.' },
+  { t: 'VPN Usage',            d: 'Always use a verified VPN when accessing community resources.' },
+  { t: 'Device Security',      d: 'Enable full-disk encryption and strong passcodes on all devices.' },
+];
 
-          {/* Local Emergency Info */}
-          <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-primary/5 p-8 rounded-3xl border border-primary/20 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-3 mb-4 text-primary">
-                  <PhoneCall size={24} />
-                  <h3 className="font-headline font-black text-xl uppercase tracking-tighter">Emergency Hotline</h3>
-                </div>
-                <p className="text-4xl font-black font-headline text-primary mb-2">{activeRegion.localInfo.emergencyContact}</p>
-                <p className="text-xs text-on-surface-variant uppercase font-bold tracking-widest leading-relaxed">
-                  Verified regional emergency coordination node. Available 24/7 for critical support.
-                </p>
-              </div>
-            </div>
+export const SafetyView: React.FC<SafetyViewProps> = ({ activeRegion }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
+    {/* HERO */}
+    <section style={{ position: 'relative' }}>
+      <AmbientGlow size={460} color="rgba(122,142,90,0.30)" style={{ top: -140, left: '30%', zIndex: -1 }} />
+      <Reveal>
+        <p style={{ fontSize: 10, fontWeight: 700, color: '#7a8e5a', textTransform: 'uppercase',
+          letterSpacing: '0.18em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ display: 'inline-block', width: 24, height: 1, background: 'currentColor',
+            verticalAlign: 'middle', opacity: 0.5 }} />
+          Safety Protocol · {activeRegion.name}
+        </p>
+      </Reveal>
+      <Reveal delay={80}>
+        <h1 style={{ fontFamily: "'Instrument Serif', Georgia, serif",
+          fontSize: 'clamp(2.6rem, 7vw, 5.4rem)', fontWeight: 400, color: S.ink,
+          letterSpacing: '-0.03em', lineHeight: 0.94, margin: 0 }}>
+          Stay informed.<br />
+          <em style={{ fontStyle: 'italic', color: '#7a8e5a' }}>Stay safe.</em>
+        </h1>
+      </Reveal>
+      <Reveal delay={180}>
+        <p style={{ fontSize: 16, color: S.muted, maxWidth: 560, lineHeight: 1.6, marginTop: 20 }}>
+          Essential protocols, emergency guides, and mutual aid resources. Refresh your knowledge
+          here before stepping outside or going dark.
+        </p>
+      </Reveal>
+    </section>
 
-            <div className="bg-secondary/5 p-8 rounded-3xl border border-secondary/20 md:col-span-2">
-              <div className="flex items-center gap-3 mb-6 text-secondary">
-                <MapPin size={24} />
-                <h3 className="font-headline font-black text-xl uppercase tracking-tighter">Verified Safe Zones in {activeRegion.name}</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {activeRegion.localInfo.safeZones.map((zone, i) => (
-                  <div key={i} className="flex items-center gap-3 p-4 bg-white rounded-2xl border border-secondary/10 shadow-sm">
-                    <div className="w-2 h-2 rounded-full bg-secondary" />
-                    <span className="font-bold text-sm">{zone}</span>
+    {/* EMERGENCY + SAFE ZONES */}
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }} className="cs-grid-md-3">
+      <Reveal>
+        <div style={{ padding: 24, position: 'relative', overflow: 'hidden', height: '100%',
+          background: S.paper, border: `1px solid ${S.rule}`, borderRadius: 16 }}>
+          <AmbientGlow size={220} color="rgba(164,74,58,0.22)" style={{ top: -80, right: -80 }} />
+          <div style={{ position: 'relative' }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: S.primary, textTransform: 'uppercase',
+              letterSpacing: '0.18em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <PhoneCall size={11} /> Emergency hotline
+            </p>
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 500,
+              color: S.ink, letterSpacing: '-0.01em', marginBottom: 10, wordBreak: 'break-all' }}>
+              {activeRegion.localInfo.emergencyContact}
+            </p>
+            <p style={{ fontSize: 11, color: S.ash, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.14em' }}>
+              Verified regional node · 24/7
+            </p>
+          </div>
+        </div>
+      </Reveal>
+      <Reveal delay={100} style={{ gridColumn: 'span 2' }}>
+        <div style={{ padding: 24, height: '100%', background: S.paper, border: `1px solid ${S.rule}`, borderRadius: 16 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: S.secondary, textTransform: 'uppercase',
+            letterSpacing: '0.18em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <MapPin size={11} /> Verified safe zones
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+            {activeRegion.localInfo.safeZones.map((zone, i) => (
+              <Reveal key={i} delay={i * 60}>
+                <div className="lift" style={{ display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '14px 16px', borderRadius: 12, background: S.paperHi, border: `1px solid ${S.ruleSoft}` }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: S.secondary,
+                    flexShrink: 0, display: 'inline-block' }} className="warm-pulse" />
+                  <span style={{ fontWeight: 500, fontSize: 13, color: S.ink }}>{zone}</span>
+                </div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </Reveal>
+    </div>
+
+    {/* PROTOCOL CARDS */}
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }} className="cs-grid-md-2">
+      {[
+        { title: 'Core safety protocol', eyebrow: 'Field guide · level 1', icon: <ShieldCheck size={20} />, color: S.primary,   items: protocols },
+        { title: 'Digital security',     eyebrow: 'Comms guide · level 1', icon: <Lock size={20} />,        color: S.secondary, items: digital   },
+      ].map((sec, j) => (
+        <Reveal key={sec.title} delay={j * 100}>
+          <div style={{ padding: 28, height: '100%', position: 'relative', overflow: 'hidden',
+            background: S.paper, border: `1px solid ${S.rule}`, borderRadius: 16 }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: sec.color, textTransform: 'uppercase',
+              letterSpacing: '0.18em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {sec.eyebrow}
+            </p>
+            <h3 style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontSize: 28, color: S.ink,
+              letterSpacing: '-0.02em', lineHeight: 1, marginBottom: 20, fontStyle: 'italic' }}>
+              {sec.title}
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {sec.items.map((p, i) => (
+                <Reveal key={p.t} delay={j * 100 + i * 60 + 200}>
+                  <div style={{ display: 'flex', gap: 14, padding: '14px 0',
+                    borderTop: i === 0 ? 'none' : `1px solid ${S.ruleSoft}` }}>
+                    <div style={{ width: 24, height: 24, borderRadius: 8,
+                      background: `${sec.color}18`, color: sec.color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <CheckCircle2 size={14} />
+                    </div>
+                    <div>
+                      <h4 style={{ fontWeight: 600, fontSize: 13.5, color: S.ink, marginBottom: 4, letterSpacing: '-0.005em' }}>
+                        {p.t}
+                      </h4>
+                      <p style={{ fontSize: 12.5, color: S.muted, lineHeight: 1.55 }}>{p.d}</p>
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="bg-surface-container-low p-10 rounded-3xl border border-primary/20 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-8 opacity-10">
-                <ShieldCheck size={120} className="text-primary" />
-              </div>
-              <div className="relative z-10">
-                <h3 className="font-headline font-black text-3xl uppercase tracking-tighter text-primary mb-6 flex items-center gap-3">
-                  <ShieldCheck size={32} />
-                  Core Safety Protocol
-                </h3>
-                <ul className="space-y-4">
-                  <SafetyListItem 
-                    title="Check-in with Local Hub" 
-                    description="Always notify your local community hub of your status and location."
-                  />
-                  <SafetyListItem 
-                    title="Verified Information" 
-                    description="Only share information that has been cross-verified by community nodes."
-                  />
-                  <SafetyListItem 
-                    title="Emergency Supplies" 
-                    description="Keep a basic first aid kit, water, and non-perishable food accessible."
-                  />
-                  <SafetyListItem 
-                    title="Cluster Movement" 
-                    description="Avoid moving alone; stay within your community clusters for safety."
-                  />
-                </ul>
-              </div>
-            </div>
-
-            <div className="bg-surface-container-low p-10 rounded-3xl border border-secondary/20 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-8 opacity-10">
-                <Lock size={120} className="text-secondary" />
-              </div>
-              <div className="relative z-10">
-                <h3 className="font-headline font-black text-3xl uppercase tracking-tighter text-secondary mb-6 flex items-center gap-3">
-                  <Lock size={32} />
-                  Digital Security
-                </h3>
-                <ul className="space-y-4">
-                  <SafetyListItem 
-                    title="Secure Communication" 
-                    description="Use encrypted messaging apps for all community coordination."
-                  />
-                  <SafetyListItem 
-                    title="Metadata Protection" 
-                    description="Remove EXIF data from photos before sharing them on the feed."
-                  />
-                  <SafetyListItem 
-                    title="VPN Usage" 
-                    description="Always use a verified VPN when accessing community resources."
-                  />
-                  <SafetyListItem 
-                    title="Device Security" 
-                    description="Enable full-disk encryption and strong passcodes on all devices."
-                  />
-                </ul>
-              </div>
-            </div>
-          </section>
-
-          <section className="bg-surface-container-high p-12 rounded-3xl border border-black/5">
-            <h3 className="font-headline font-black text-3xl uppercase tracking-tighter mb-8 text-center">Available Resources in {activeRegion.name}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {activeRegion.localInfo.resources.map((resource, i) => (
-                <div key={i} className="bg-background p-6 rounded-2xl border border-black/5 flex items-center gap-4 hover:border-primary/20 transition-all">
-                  <div className="p-3 bg-tertiary/10 rounded-xl text-tertiary">
-                    <Heart size={20} />
-                  </div>
-                  <span className="font-bold text-sm">{resource}</span>
-                </div>
+                </Reveal>
               ))}
             </div>
-          </section>
-        </motion.div>
-      </AnimatePresence>
-    </div>
-  );
-};
-
-const SafetyListItem = ({ title, description }: { title: string, description: string }) => (
-  <li className="flex gap-4">
-    <div className="flex-shrink-0 mt-1">
-      <CheckCircle2 size={18} className="text-primary" />
-    </div>
-    <div>
-      <h4 className="font-bold text-sm mb-1">{title}</h4>
-      <p className="text-xs text-on-surface-variant leading-relaxed">{description}</p>
-    </div>
-  </li>
-);
-
-const GuideCard = ({ title, icon, links }: { title: string, icon: React.ReactNode, links: string[] }) => (
-  <div className="bg-background p-8 rounded-2xl border border-black/5 hover:border-primary/20 transition-all">
-    <div className="mb-6 flex items-center gap-3">
-      {icon}
-      <h4 className="font-headline font-black text-xl uppercase tracking-tighter">{title}</h4>
-    </div>
-    <ul className="space-y-3">
-      {links.map((link, i) => (
-        <li key={i} className="text-sm text-on-surface-variant hover:text-primary transition-all cursor-pointer flex items-center gap-2">
-          <div className="w-1 h-1 bg-on-surface-variant/30 rounded-full" />
-          {link}
-        </li>
+          </div>
+        </Reveal>
       ))}
-    </ul>
+    </div>
+
+    {/* RESOURCES */}
+    <Reveal>
+      <div style={{ padding: '32px 28px', position: 'relative', overflow: 'hidden',
+        background: S.paper, border: `1px solid ${S.rule}`, borderRadius: 16 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: S.tertiary, textTransform: 'uppercase',
+          letterSpacing: '0.18em', marginBottom: 14 }}>Locally available · {activeRegion.name}</p>
+        <h3 style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontSize: 32, color: S.ink,
+          letterSpacing: '-0.02em', marginBottom: 24, lineHeight: 1, fontStyle: 'italic' }}>
+          Resources nearby
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+          {activeRegion.localInfo.resources.map((resource, i) => (
+            <Reveal key={i} delay={i * 60}>
+              <div className="lift" style={{ display: 'flex', alignItems: 'center', gap: 12,
+                padding: '16px 18px', borderRadius: 12, background: S.paperHi,
+                border: `1px solid ${S.ruleSoft}`, cursor: 'pointer' }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10,
+                  background: `${S.tertiary}18`, color: S.tertiary,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Heart size={16} />
+                </div>
+                <span style={{ fontWeight: 500, fontSize: 13, color: S.ink }}>{resource}</span>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </Reveal>
   </div>
 );

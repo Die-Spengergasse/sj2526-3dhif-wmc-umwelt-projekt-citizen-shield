@@ -1,37 +1,178 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800;900&family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap');
 
+/* ── Fonts ─────────────────────────────────────────── */
 @theme {
-  --font-headline: "Space Grotesk", sans-serif;
-  --font-body: "Inter", sans-serif;
-  
-  --color-background: #ffffff;
-  --color-surface: #ffffff;
-  --color-surface-container: #f8f9fa;
-  --color-surface-container-low: #f1f3f5;
-  --color-surface-container-high: #e9ecef;
-  --color-surface-container-highest: #dee2e6;
-  --color-surface-bright: #ced4da;
-  
-  --color-primary: #1a1a1a;
-  --color-primary-dim: #495057;
-  --color-secondary: #0066cc;
-  --color-tertiary: #059669;
-  --color-error: #dc3545;
-  --color-error-container: #f8d7da;
-  
-  --color-on-surface: #1a1a1a;
-  --color-on-surface-variant: #6c757d;
-  --color-outline-variant: #adb5bd;
+  --font-sans:     "Plus Jakarta Sans", sans-serif;
+  --font-headline: "Instrument Serif", Georgia, serif;
+  --font-body:     "Plus Jakarta Sans", sans-serif;
+  --font-mono:     "JetBrains Mono", monospace;
+
+  --color-background:                #f0e9da;
+  --color-primary:                   #a44a3a;
+  --color-primary-dim:               #c66856;
+  --color-secondary:                 #3d6b78;
+  --color-tertiary:                  #7a8e5a;
+  --color-on-surface:                #1f1a13;
+  --color-on-surface-variant:        #8a7e6d;
+  --color-surface:                   #ebe2cd;
+  --color-surface-container:         #fbf7ec;
+  --color-surface-container-low:     #f5efde;
+  --color-surface-container-high:    #e8dfc8;
+  --color-surface-container-highest: #dfd4ba;
 }
 
+/* ── Base ───────────────────────────────────────────── */
 @layer base {
   html, body {
-    @apply bg-background text-on-surface font-body selection:bg-primary selection:text-black overflow-x-hidden;
+    background: #f0e9da;
+    color: #1f1a13;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    overflow-x: hidden;
     width: 100%;
     position: relative;
   }
 }
 
+/* ── Keyframes ──────────────────────────────────────── */
+@keyframes glow-breath {
+  0%, 100% { opacity: 0.7; transform: scale(1);    }
+  50%       { opacity: 1;   transform: scale(1.06); }
+}
+
+@keyframes warm-pulse {
+  0%   { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  70%  { box-shadow: 0 0 0 6px transparent; opacity: 0.4; }
+  100% { box-shadow: 0 0 0 0 transparent;   opacity: 1; }
+}
+
+@keyframes cs-ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@keyframes cs-drawer-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes reveal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes reveal-slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+/* ── Utility classes ────────────────────────────────── */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.reveal-fade { animation: reveal-fade-in 220ms ease both; }
+.reveal-up   { animation: reveal-slide-up 320ms cubic-bezier(.2,.7,.2,1) both; }
+
+.cs-drawer-in { animation: cs-drawer-slide-in 320ms cubic-bezier(.2,.7,.2,1) both; }
+
+.view-in { animation: reveal-slide-up 400ms cubic-bezier(.2,.7,.2,1) both; }
+
+.warm-pulse { animation: warm-pulse 1.8s ease-out infinite; }
+
+.skeleton {
+  background: linear-gradient(90deg, #e8dfc8 25%, #f5efde 50%, #e8dfc8 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+.lift {
+  transition: transform 280ms cubic-bezier(.2,.7,.2,1), box-shadow 280ms cubic-bezier(.2,.7,.2,1);
+}
+.lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 40px -16px rgba(89,46,28,0.22);
+}
+
+hr.rule, .rule {
+  border: none;
+  border-top: 1px solid rgba(31,26,19,0.10);
+  margin: 0;
+}
+
+/* ── Responsive helpers ─────────────────────────────── */
+.cs-desktop-only { display: none !important; }
+.cs-mobile-only  { display: flex  !important; }
+
+@media (min-width: 768px) {
+  .cs-desktop-only { display: flex !important; }
+  .cs-mobile-only  { display: none !important; }
+}
+
+/* ── Nav layout ─────────────────────────────────────── */
+.cs-nav-desktop {
+  display: flex;
+}
+.cs-nav-mobile {
+  display: flex;
+}
+
+.cs-topnav-items {
+  display: flex;
+}
+
+/* ── Grid helpers ───────────────────────────────────── */
+.cs-grid-md-4 {
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (min-width: 768px) {
+  .cs-grid-md-4 { grid-template-columns: repeat(4, 1fr); }
+}
+
+.cs-grid-md-3 {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 768px) {
+  .cs-grid-md-3 { grid-template-columns: repeat(3, 1fr); }
+  .cs-md-col-2  { grid-column: span 2; }
+}
+
+.cs-grid-md-2 {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 768px) {
+  .cs-grid-md-2 { grid-template-columns: repeat(2, 1fr); }
+}
+
+.cs-grid-lg-2a1 {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 1024px) {
+  .cs-grid-lg-2a1 { grid-template-columns: 2fr 1fr; }
+}
+
+/* ── Main layout ────────────────────────────────────── */
+.cs-main {
+  padding-top: 106px; /* nav (72) + ticker (34) */
+  padding-bottom: 80px;
+  position: relative;
+  min-height: 100vh;
+}
+@media (min-width: 768px) {
+  .cs-main {
+    padding-bottom: 40px;
+  }
+}
+
+.cs-main-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 32px 16px 80px;
+}
+@media (min-width: 640px) {
+  .cs-main-inner { padding: 40px 24px 80px; }
+}

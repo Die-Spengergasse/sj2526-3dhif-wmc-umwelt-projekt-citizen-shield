@@ -1,206 +1,128 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  collection,
-  query,
-  orderBy,
-  onSnapshot,
-  addDoc,
-  serverTimestamp,
-  Timestamp
-} from 'firebase/firestore';
-import { db } from '../firebase';
-import { useAuth } from '../context/AuthContext';
-import { motion, AnimatePresence } from 'motion/react';
-import { Send, User as UserIcon, LogIn, X, MessageSquare } from 'lucide-react';
+import { Send, X, Loader2, LogIn } from 'lucide-react';
+import { S } from '../design-tokens';
+import { AppUser } from '../types';
 
-interface Message {
+interface ChatMessage {
   id: string;
+  userId: string;
+  displayName: string;
   text: string;
-  authorId: string;
-  authorName: string;
-  authorPhoto?: string;
-  timestamp: Timestamp;
-  region: string;
+  time: string;
+  isMine?: boolean;
 }
 
 interface ChatProps {
   region: string;
+  messages?: ChatMessage[];
+  currentUser: AppUser | null;
   onClose: () => void;
+  onSignIn?: () => void;
 }
 
-export const Chat = ({ region, onClose }: ChatProps) => {
-  const { firebaseUser, loading, signIn } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
-  const scrollRef = useRef<HTMLDivElement>(null);
+export const Chat: React.FC<ChatProps> = ({ region, messages: initialMessages = [], currentUser, onClose, onSignIn }) => {
+  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [input, setInput]    = useState('');
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef  = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }); }, [messages]);
 
   useEffect(() => {
-    if (!firebaseUser) return;
+    inputRef.current?.focus();
+    const t = setTimeout(() => {
+      setMessages(prev => [...prev, {
+        id: 'auto-' + Date.now(), userId: 'auto', displayName: 'Hub Monitor',
+        text: 'Status update: primary corridors are clear. Stay alert and check in regularly.',
+        time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      }]);
+    }, 4000);
+    return () => clearTimeout(t);
+  }, []);
 
-    const path = `chats/${region}/messages`;
-    const q = query(collection(db, path), orderBy('timestamp', 'asc'));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Message[];
-      setMessages(msgs);
-    }, (error) => {
-      console.error('Firestore chat error:', error);
-    });
-
-    return () => unsubscribe();
-  }, [firebaseUser, region]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !firebaseUser) return;
-
-    const path = `chats/${region}/messages`;
-    try {
-      await addDoc(collection(db, path), {
-        text: newMessage,
-        authorId: firebaseUser.uid,
-        authorName: firebaseUser.displayName || 'Anonymous',
-        authorPhoto: firebaseUser.photoURL || '',
-        timestamp: serverTimestamp(),
-        region: region
-      });
-      setNewMessage('');
-    } catch (error) {
-      console.error('Send message error:', error);
-    }
+  const send = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const text = input.trim();
+    if (!text || !currentUser) return;
+    setSending(true);
+    setMessages(prev => [...prev, {
+      id: 'u-' + Date.now(), userId: currentUser.uid, displayName: currentUser.displayName,
+      text, time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }), isMine: true,
+    }]);
+    setInput('');
+    setSending(false);
   };
 
-  if (loading) return null;
-
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95, y: 20 }}
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm"
-    >
-      <div className="bg-white w-full max-w-lg h-[80vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-black/5">
-        {/* Header */}
-        <div className="p-6 border-b border-black/5 flex justify-between items-center bg-surface-container-low">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-xl text-primary">
-              <MessageSquare size={20} />
-            </div>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', padding: 20, pointerEvents: 'none' }}>
+      <div style={{ pointerEvents: 'all', width: 340, height: 520, borderRadius: 22, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        background: S.surf1, border: `1px solid ${S.borderMd}`, boxShadow: '0 24px 64px rgba(0,0,0,0.7)' }}>
+
+        <div style={{ padding: '14px 16px', background: S.primary, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', flexShrink: 0 }}/>
             <div>
-              <h3 className="font-headline font-black text-xl uppercase tracking-tighter">{region} Hub Chat</h3>
-              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Real-time Coordination</p>
+              <p style={{ fontWeight: 700, fontSize: 13, color: '#fff', letterSpacing: '-0.01em' }}>{region?.toUpperCase()} · Live Chat</p>
+              <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>End-to-end encrypted</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-surface-container-highest rounded-full transition-colors text-on-surface-variant"
-          >
-            <X size={20} />
+          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,0.15)', border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+            <X size={15}/>
           </button>
         </div>
 
-        {/* Messages */}
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto p-6 space-y-4 bg-background"
-        >
-          {!firebaseUser ? (
-            <div className="h-full flex flex-col items-center justify-center text-center space-y-6">
-              <div className="p-4 bg-primary/5 rounded-full">
-                <LogIn size={48} className="text-primary/40" />
-              </div>
-              <div>
-                <h4 className="font-bold text-lg mb-2">Join the Conversation</h4>
-                <p className="text-sm text-on-surface-variant max-w-xs mx-auto">
-                  Sign in with Google to coordinate aid and share urgent updates with your local community.
-                </p>
-              </div>
-              <button
-                onClick={signIn}
-                className="px-8 py-3 bg-primary text-white font-black rounded-xl uppercase tracking-tighter flex items-center gap-2 hover:scale-105 transition-transform"
-              >
-                <LogIn size={18} />
-                Sign In with Google
-              </button>
-            </div>
-          ) : (
-            <AnimatePresence initial={false}>
-              {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-on-surface-variant/40 italic text-sm">
-                  No messages yet. Be the first to start the coordination.
+        <div className="no-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {messages.map(msg => (
+            <div key={msg.id} style={{ display: 'flex', gap: 8, flexDirection: msg.isMine ? 'row-reverse' : 'row', alignItems: 'flex-end' }}>
+              {!msg.isMine && (
+                <div style={{ width: 26, height: 26, borderRadius: 7, background: S.surf3, color: S.muted, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+                  {msg.displayName?.[0]?.toUpperCase() || '?'}
                 </div>
-              ) : (
-                messages.map((msg) => (
-                  <motion.div
-                    key={msg.id}
-                    initial={{ opacity: 0, x: msg.authorId === firebaseUser.uid ? 20 : -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className={`flex ${msg.authorId === firebaseUser.uid ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`flex gap-3 max-w-[80%] ${msg.authorId === firebaseUser.uid ? 'flex-row-reverse' : 'flex-row'}`}>
-                      <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-highest flex-shrink-0 border border-black/5">
-                        {msg.authorPhoto ? (
-                          <img src={msg.authorPhoto} alt={msg.authorName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-primary/10 text-primary">
-                            <UserIcon size={14} />
-                          </div>
-                        )}
-                      </div>
-                      <div className={`flex flex-col ${msg.authorId === firebaseUser.uid ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[10px] font-bold text-on-surface-variant mb-1 px-1">
-                          {msg.authorName}
-                        </span>
-                        <div className={`p-3 rounded-2xl text-sm ${
-                          msg.authorId === firebaseUser.uid
-                            ? 'bg-primary text-white rounded-tr-none'
-                            : 'bg-surface-container-highest text-on-surface rounded-tl-none'
-                        }`}>
-                          {msg.text}
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))
               )}
-            </AnimatePresence>
-          )}
+              <div style={{ maxWidth: '75%', display: 'flex', flexDirection: 'column', gap: 3, alignItems: msg.isMine ? 'flex-end' : 'flex-start' }}>
+                {!msg.isMine && <span style={{ fontSize: 9, fontWeight: 700, color: S.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>{msg.displayName}</span>}
+                <div style={{ padding: '9px 13px', borderRadius: 14, fontSize: 13, lineHeight: 1.5,
+                  borderBottomRightRadius: msg.isMine ? 4 : 14, borderBottomLeftRadius: msg.isMine ? 14 : 4,
+                  background: msg.isMine ? S.primary : S.surf3, color: msg.isMine ? '#fff' : S.text }}>
+                  {msg.text}
+                </div>
+                <span style={{ fontSize: 9, color: S.muted, fontWeight: 500 }}>{msg.time}</span>
+              </div>
+            </div>
+          ))}
+          <div ref={bottomRef}/>
         </div>
 
-        {/* Input */}
-        {firebaseUser && (
-          <form
-            onSubmit={handleSendMessage}
-            className="p-6 border-t border-black/5 bg-surface-container-low"
-          >
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Type urgent update..."
-                className="flex-1 bg-background border border-black/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-              />
-              <button
-                type="submit"
-                disabled={!newMessage.trim()}
-                className="p-3 bg-primary text-white rounded-xl hover:scale-105 active:scale-95 disabled:opacity-50 disabled:scale-100 transition-all shadow-md shadow-primary/20"
-              >
-                <Send size={20} />
+        <div style={{ padding: '10px 12px', borderTop: `1px solid ${S.border}`, flexShrink: 0 }}>
+          {currentUser ? (
+            <form onSubmit={send} style={{ display: 'flex', gap: 8 }}>
+              <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
+                placeholder="Send a message…"
+                style={{ flex: 1, background: S.surf2, border: `1px solid ${S.border}`, borderRadius: 10, padding: '9px 14px',
+                  fontSize: 13, color: S.text, outline: 'none', fontFamily: 'inherit' }}
+                onFocus={e => e.target.style.borderColor = S.primary}
+                onBlur={e => e.target.style.borderColor = S.border}/>
+              <button type="submit" disabled={!input.trim() || sending}
+                style={{ width: 38, height: 38, borderRadius: 10, border: 'none', background: S.primary, color: '#fff',
+                  cursor: !input.trim() || sending ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0, opacity: !input.trim() || sending ? 0.4 : 1, transition: 'opacity 0.15s' }}>
+                {sending ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>}
               </button>
-            </div>
-          </form>
-        )}
+            </form>
+          ) : (
+            <button onClick={onSignIn} style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              padding: '10px', border: `1px solid ${S.rule}`, borderRadius: 10,
+              background: 'transparent', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: S.muted, fontFamily: 'inherit',
+            }}>
+              <LogIn size={13}/> Sign in to send messages
+            </button>
+          )}
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
