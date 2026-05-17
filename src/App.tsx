@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { TopNav } from './components/TopNav';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
-import { LiveTicker } from './components/LiveTicker';
 import { Chat } from './components/Chat';
 import { PostForm } from './components/PostForm';
 import { SignInModal } from './components/SignInModal';
@@ -164,21 +163,28 @@ export default function App() {
   const handlePinPost = (post: Post) => {
     if (!user) { setSignInOpen(true); return; }
     const slug = post.regionId;
+    // Compute isPinned from current snapshot — side effects must stay outside the updater
+    // to avoid double-firing in React StrictMode (updaters are called twice in dev).
+    const cur = Array.isArray(pinnedPosts[slug])
+      ? pinnedPosts[slug] as string[]
+      : pinnedPosts[slug] ? [pinnedPosts[slug] as string] : [];
+    const isPinned = cur.includes(post.id);
+
     setPinnedPosts(prev => {
-      const cur = Array.isArray(prev[slug]) ? prev[slug] as string[] : (prev[slug] ? [prev[slug] as string] : []);
-      const isPinned = cur.includes(post.id);
-      const next = isPinned ? cur.filter(id => id !== post.id) : [post.id, ...cur];
-      showToast(isPinned
-        ? { text: `Unpinned from ${slug?.toUpperCase()} Community.`, tone: 'ink' }
-        : { text: `Pinned to ${slug?.toUpperCase()} Community. Tap Community to discuss.`, tone: 'primary' });
-      if (!isPinned) {
-        setNotifications(prevN => [
-          { id: 'n-pin-' + Date.now(), text: `"${post.title}" was pinned for community discussion`, _at: Date.now(), read: false, time: 'Just now' },
-          ...prevN,
-        ]);
-      }
+      const c = Array.isArray(prev[slug]) ? prev[slug] as string[] : (prev[slug] ? [prev[slug] as string] : []);
+      const next = c.includes(post.id) ? c.filter(id => id !== post.id) : [post.id, ...c];
       return { ...prev, [slug]: next };
     });
+
+    showToast(isPinned
+      ? { text: `Unpinned from ${slug?.toUpperCase()} Community.`, tone: 'ink' }
+      : { text: `Pinned to ${slug?.toUpperCase()} Community. Tap Community to discuss.`, tone: 'primary' });
+    if (!isPinned) {
+      setNotifications(prev => [
+        { id: 'n-pin-' + Date.now(), text: `"${post.title}" was pinned for community discussion`, _at: Date.now(), read: false, time: 'Just now' },
+        ...prev,
+      ]);
+    }
   };
 
   const handleJoinRegion = async (slug: string, u: AppUser | null, signInFn: () => void) => {
@@ -229,11 +235,7 @@ export default function App() {
         <Chat region={chatRegion} currentUser={user} onClose={() => setChatRegion(null)} />
       )}
 
-      {regions.length > 0 && posts.length > 0 && (
-        <LiveTicker regions={regions} posts={posts} />
-      )}
-
-      <main style={{ paddingTop: 100, paddingBottom: 120, position: 'relative', minHeight: '100vh' }}>
+      <main style={{ paddingTop: 80, paddingBottom: 120, position: 'relative', minHeight: '100vh' }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '40px 24px 80px' }} className="cs-main-inner">
           <div key={view}>
             {view === 'hub' && (
