@@ -131,16 +131,45 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 -- Typsichere Werte für Status-Felder
 -- ============================================================
 
-CREATE TYPE region_intensity      AS ENUM ('CRITICAL', 'HIGH', 'ALERT', 'STABLE');
-CREATE TYPE user_role_in_region   AS ENUM ('member', 'moderator', 'hub_coordinator');
-CREATE TYPE post_type             AS ENUM ('critical', 'info', 'broadcast');
-CREATE TYPE post_status           AS ENUM ('live', 'pending_review', 'rejected');
-CREATE TYPE location_status       AS ENUM ('verified', 'unverified', 'none', 'pending_review');
-CREATE TYPE location_source       AS ENUM ('exif', 'manual', 'geocoded');
-CREATE TYPE vote_type             AS ENUM ('upvote', 'downvote');
-CREATE TYPE moderation_reason     AS ENUM ('distance_exceeded', 'flagged', 'manual');
-CREATE TYPE moderation_status     AS ENUM ('pending', 'approved', 'rejected');
-CREATE TYPE verification_action   AS ENUM ('granted', 'revoked');
+DO $$ BEGIN
+  CREATE TYPE region_intensity      AS ENUM ('CRITICAL', 'HIGH', 'ALERT', 'STABLE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE user_role_in_region   AS ENUM ('member', 'moderator', 'hub_coordinator');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE post_type             AS ENUM ('critical', 'info', 'broadcast');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE post_status           AS ENUM ('live', 'pending_review', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE location_status       AS ENUM ('verified', 'unverified', 'none', 'pending_review');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE location_source       AS ENUM ('exif', 'manual', 'geocoded');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE vote_type             AS ENUM ('upvote', 'downvote');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE moderation_reason     AS ENUM ('distance_exceeded', 'flagged', 'manual');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE moderation_status     AS ENUM ('pending', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE verification_action   AS ENUM ('granted', 'revoked');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 
 -- ============================================================
@@ -148,7 +177,7 @@ CREATE TYPE verification_action   AS ENUM ('granted', 'revoked');
 -- Zentrale Identitätstabelle – verknüpft mit Google Auth
 -- ============================================================
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id                      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   google_uid              TEXT          NOT NULL UNIQUE,        -- Firebase Auth UID
   email                   TEXT          NOT NULL UNIQUE,
@@ -176,7 +205,7 @@ COMMENT ON COLUMN users.verified_revoke_reason IS 'Pflichtfeld wenn is_verified 
 -- Cached Stats für Badge-Berechnung – 1:1 zu users
 -- ============================================================
 
-CREATE TABLE user_verification_stats (
+CREATE TABLE IF NOT EXISTS user_verification_stats (
   user_id                   UUID    PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   total_posts               INT     NOT NULL DEFAULT 0,
   qualifying_posts          INT     NOT NULL DEFAULT 0,   -- Posts mit ≥90% Upvotes bei ≥50 Stimmen
@@ -194,7 +223,7 @@ COMMENT ON COLUMN user_verification_stats.qualifying_posts IS 'Anzahl Posts die 
 -- Audit Trail für jeden Badge-Entzug oder -Vergabe durch Admin
 -- ============================================================
 
-CREATE TABLE verification_log (
+CREATE TABLE IF NOT EXISTS verification_log (
   id          UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     UUID                NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   admin_id    UUID                NOT NULL REFERENCES users(id),
@@ -211,7 +240,7 @@ COMMENT ON TABLE verification_log IS 'Vollständige History aller Badge-Vergaben
 -- Krisenregionen – dynamische Status-Felder werden vom Backend aktualisiert
 -- ============================================================
 
-CREATE TABLE regions (
+CREATE TABLE IF NOT EXISTS regions (
   id                UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
   slug              TEXT              NOT NULL UNIQUE,
   name              TEXT              NOT NULL,
@@ -238,7 +267,7 @@ COMMENT ON COLUMN regions.center_lat   IS 'Geographisches Zentrum (typischerweis
 -- Verifizierte sichere Treffpunkte pro Region
 -- ============================================================
 
-CREATE TABLE region_safe_zones (
+CREATE TABLE IF NOT EXISTS region_safe_zones (
   id          UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
   region_id   UUID  NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
   name        TEXT  NOT NULL,
@@ -253,7 +282,7 @@ COMMENT ON TABLE region_safe_zones IS 'Verifizierte Safe Zones pro Region. Erwei
 -- Lokale Ressourcen (Medizin, Rechtsberatung, etc.)
 -- ============================================================
 
-CREATE TABLE region_resources (
+CREATE TABLE IF NOT EXISTS region_resources (
   id          UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
   region_id   UUID  NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
   title       TEXT  NOT NULL,
@@ -269,7 +298,7 @@ COMMENT ON TABLE region_resources IS 'Lokale Ressourcen pro Region. category erm
 -- M:N Verbindung User ↔ Region mit Rolle
 -- ============================================================
 
-CREATE TABLE user_regions (
+CREATE TABLE IF NOT EXISTS user_regions (
   id          UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     UUID                NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   region_id   UUID                NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
@@ -288,7 +317,7 @@ COMMENT ON COLUMN user_regions.role IS 'member = normaler User, moderator = kann
 -- Community-Reports – werden sofort gepostet (außer bei Distanz-Anomalie)
 -- ============================================================
 
-CREATE TABLE posts (
+CREATE TABLE IF NOT EXISTS posts (
   id                    UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
   region_id             UUID              NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
   author_id             UUID              NOT NULL REFERENCES users(id),
@@ -336,7 +365,7 @@ COMMENT ON COLUMN posts.location_distance_m IS 'Berechnete Distanz beim Upload. 
 -- Tags als eigene Tabelle für Querybarkeit
 -- ============================================================
 
-CREATE TABLE post_tags (
+CREATE TABLE IF NOT EXISTS post_tags (
   id        UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
   post_id   UUID  NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   tag       TEXT  NOT NULL CHECK (char_length(tag) BETWEEN 1 AND 50),
@@ -352,7 +381,7 @@ COMMENT ON TABLE post_tags IS 'Tags als separate Zeilen – ermöglicht Filterun
 -- Öffentliche Votes – jeder sieht wer wie gevoted hat
 -- ============================================================
 
-CREATE TABLE post_votes (
+CREATE TABLE IF NOT EXISTS post_votes (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   post_id     UUID        NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   voter_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -371,7 +400,7 @@ COMMENT ON COLUMN post_votes.vote_type IS 'upvote oder downvote. Ändern via UPD
 -- Posts die >5km vom angegebenen Ort entfernt erstellt wurden
 -- ============================================================
 
-CREATE TABLE moderation_queue (
+CREATE TABLE IF NOT EXISTS moderation_queue (
   id              UUID                  PRIMARY KEY DEFAULT gen_random_uuid(),
   post_id         UUID                  NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   moderator_id    UUID                  REFERENCES users(id),
@@ -392,14 +421,14 @@ COMMENT ON COLUMN moderation_queue.distance_m   IS 'Distanz in Metern zwischen U
 -- 21. INDEXES
 -- ============================================================
 
-CREATE INDEX idx_posts_region_created ON posts (region_id, created_at DESC);
-CREATE INDEX idx_posts_status         ON posts (post_status);
-CREATE INDEX idx_posts_location       ON posts (location_status) WHERE location_status = 'verified';
-CREATE INDEX idx_modqueue_pending     ON moderation_queue (status, created_at) WHERE status = 'pending';
-CREATE INDEX idx_votes_post_voter     ON post_votes (post_id, voter_id);
-CREATE INDEX idx_tags_tag             ON post_tags (tag);
-CREATE INDEX idx_users_google_uid     ON users (google_uid);
-CREATE INDEX idx_regions_slug         ON regions (slug);
+CREATE INDEX IF NOT EXISTS idx_posts_region_created ON posts (region_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_status         ON posts (post_status);
+CREATE INDEX IF NOT EXISTS idx_posts_location       ON posts (location_status) WHERE location_status = 'verified';
+CREATE INDEX IF NOT EXISTS idx_modqueue_pending     ON moderation_queue (status, created_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_votes_post_voter     ON post_votes (post_id, voter_id);
+CREATE INDEX IF NOT EXISTS idx_tags_tag             ON post_tags (tag);
+CREATE INDEX IF NOT EXISTS idx_users_google_uid     ON users (google_uid);
+CREATE INDEX IF NOT EXISTS idx_regions_slug         ON regions (slug);
 
 
 -- ============================================================
@@ -414,6 +443,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_posts_updated_at ON posts;
 CREATE TRIGGER trg_posts_updated_at
   BEFORE UPDATE ON posts
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
@@ -436,6 +466,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_sync_vote_counts ON post_votes;
 CREATE TRIGGER trg_sync_vote_counts
   AFTER INSERT OR UPDATE OR DELETE ON post_votes
   FOR EACH ROW EXECUTE FUNCTION sync_vote_counts();
@@ -454,6 +485,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_create_verification_stats ON users;
 CREATE TRIGGER trg_create_verification_stats
   AFTER INSERT ON users
   FOR EACH ROW EXECUTE FUNCTION create_verification_stats();
@@ -468,7 +500,8 @@ INSERT INTO regions (slug, name, intensity, active_hubs, connectivity, descripti
   ('myanmar', 'MYANMAR', 'HIGH',     28, 45, 'Civil Disobedience Movement nodes are coordinating essential services.',        'Signal: @MyanmarAid_Bot',  16.8409, 96.1735),
   ('sudan',   'SUDAN',   'CRITICAL', 12, 38, 'Resistance Committees are managing neighborhood-level aid distribution.',       'WhatsApp: +249 912 345 678', 15.5007, 32.5599),
   ('iran',    'IRAN',    'HIGH',     42, 55, 'Decentralized networks are providing critical updates on internet blackouts.',   'Telegram: @IranFreedom_Support', 35.6892, 51.3890),
-  ('georgia', 'GEORGIA', 'ALERT',    18, 88, 'Monitoring legislative developments and coordinating peaceful assemblies.',     '+995 32 2 123 456',        41.7151, 44.8271);
+  ('georgia', 'GEORGIA', 'ALERT',    18, 88, 'Monitoring legislative developments and coordinating peaceful assemblies.',     '+995 32 2 123 456',        41.7151, 44.8271)
+ON CONFLICT (slug) DO NOTHING;
 
 
 -- ============================================================
