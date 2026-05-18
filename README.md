@@ -48,26 +48,32 @@ Edit `.env` and fill in your credentials:
 You only need `psql` and access to the PostgreSQL superuser (typically `postgres`).
 
 `Backend/000_citizen_shield_complete.sql` is fully self-contained and idempotent. In a single pass it:
-- creates the `citizen_shield` database and the `citizen_shield_admin` role
+- creates the `citizen_shield` database and the `citizen_shield_user` role
 - grants full DDL + DML rights on current and future objects
 - installs the required extensions (`pgcrypto`, `earthdistance`) — which require superuser
 - creates all tables, enums, indexes, triggers, and seeds initial region data
 
-Run it as the `postgres` superuser and pass the admin password via `-v`:
+Run it as the `postgres` superuser:
 
 ```bash
-psql -h localhost -U postgres -v admin_password=DeinSicheresPasswort -f Backend/000_citizen_shield_complete.sql
+psql -h localhost -U postgres -f Backend/000_citizen_shield_complete.sql
 ```
 
-Then put the same password into your `.env` file:
+By default this creates the role `citizen_shield_user` with the password `citizen_shield`. That matches the connection string used everywhere else in this guide, so for local development no extra flags are required.
+
+If you want a different password (recommended for anything beyond local dev), pass it via `-v`:
+
+```bash
+psql -h localhost -U postgres -v admin_password=YourStrongPassword -f Backend/000_citizen_shield_complete.sql
+```
+
+Then put the matching credentials into your `.env`:
 
 ```
-DATABASE_URL=postgres://citizen_shield_admin:<your_password>@localhost:5432/citizen_shield
+DATABASE_URL=postgres://citizen_shield_user:citizen_shield@localhost:5432/citizen_shield
 ```
 
-> Re-running the script is safe: if the role or database already exists, the password is updated and ownership is re-applied.
-
-> If you forget to pass `-v admin_password=...`, the script falls back to `CHANGE_ME_STRONG_PASSWORD` and prints a warning. Re-run with the real password to rotate it.
+Re-running the script is safe: if the role or database already exists, the password is updated and ownership is re-applied.
 
 ### 4. Configure Firebase (frontend)
 
@@ -145,7 +151,6 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 │   │   ├── TopNav.tsx                             # Top navigation with notifications + auth UI
 │   │   ├── Sidebar.tsx                            # No-op (navigation is in TopNav)
 │   │   ├── BottomNav.tsx                          # Mobile bottom navigation (5 views)
-│   │   ├── LiveTicker.tsx                         # Fixed newsroom tape (region signals)
 │   │   ├── SignInModal.tsx                        # Google sign-in overlay
 │   │   ├── Chat.tsx                               # Local-state per-region chat panel
 │   │   ├── PostForm.tsx                           # 2-step submit community report modal
@@ -190,7 +195,6 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 - **Six views** — Hub (network stats + region grid), Globe (Three.js interactive Earth), Regions (carousel + community tools + Leaflet map), Feed (filtered timeline), Safety (protocols + resources), Community (pinned posts + DiscussionDrawer)
 - **Interactive globe** — Three.js sphere with topojson-derived continent point-cloud, orbit controls with auto-rotate, crisis-pin raycasting, click-to-navigate to Regions view
 - **Community features** — Pin posts to regional discussion boards, DiscussionDrawer with threaded comments (local state), optimistic voting with background API call
-- **Live ticker** — Fixed newsroom tape below TopNav showing region signals in real time
 - **Responsive layout** — Desktop top nav, mobile 5-item bottom nav
 - **Notifications** — Bell dropdown with live relative timestamps (via `useNow`), mark-read per item or all
 - **Inline CSS** — All components use `style={{}}` props; only utility CSS classes (`.lift`, `.warm-pulse`, `.cs-drawer-in`, `.cs-ticker-scroll`, `.reveal-fade`, etc.) come from `index.css`
@@ -229,7 +233,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 - [x] **Full design migration** — All 12 prototype files in `src/design-import/` integrated and deleted
 - [x] **Design tokens** — `src/design-tokens.ts` (S palette, INTENSITY, REGION_COORDS)
 - [x] **Motion library** — `src/motion.tsx` (Reveal, CountUp, Skeleton, IntensityRing, Toaster…)
-- [x] **All components rewritten** — Wordmark, TopNav, BottomNav, LiveTicker, SignInModal, Chat, PostForm, TimelineItem, RegionSelector, RegionMapCard, ActionButton
+- [x] **All components rewritten** — Wordmark, TopNav, BottomNav, SignInModal, Chat, PostForm, TimelineItem, RegionSelector, RegionMapCard, ActionButton
 - [x] **All views rewritten** — HubView, FeedView, SafetyView, RegionsView, CommunityView, GlobeView
 - [x] **App.tsx rewrite** — Real Firebase auth, real API calls, optimistic votes, all 6 views, notifications
 - [x] Fetch regions / region detail / posts from the API

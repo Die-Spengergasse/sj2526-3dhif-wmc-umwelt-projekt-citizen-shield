@@ -28,10 +28,10 @@
 -- ------------------------------------------------------------
 \if :{?admin_password}
 \else
-  \set admin_password CHANGE_ME_STRONG_PASSWORD
+  \set admin_password citizen_shield
   \echo ''
-  \echo '*** WARNUNG: kein Passwort uebergeben – Platzhalter wird benutzt.         ***'
-  \echo '*** Mit  -v admin_password=<pw>  ein eigenes Passwort setzen.             ***'
+  \echo '*** WARNUNG: kein Passwort uebergeben – Default "citizen_shield" wird benutzt. ***'
+  \echo '*** Mit  -v admin_password=<pw>  ein eigenes Passwort setzen.                  ***'
   \echo ''
 \endif
 
