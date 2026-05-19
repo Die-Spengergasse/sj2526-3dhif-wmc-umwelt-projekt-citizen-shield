@@ -16,7 +16,6 @@ import { Wordmark } from './components/Wordmark';
 import {
   fetchRegions, fetchRegionDetail, fetchPosts, createPost, voteOnPost,
   joinRegion, leaveRegion, fetchPinnedPosts, pinPost, unpinPost,
-  createComment,
 } from './api';
 import { useAuth } from './context/AuthContext';
 import { S } from './design-tokens';
@@ -95,9 +94,8 @@ export default function App() {
     loadPosts(activeRegion.slug);
   }, [activeRegion?.slug, loadPosts]);
 
-  // Load pinned posts from API when user signs in
+  // Pins are community-wide — load for everyone (incl. signed-out users) and refresh on auth change.
   useEffect(() => {
-    if (!user) { setPinnedPosts({}); return; }
     fetchPinnedPosts()
       .then(grouped => setPinnedPosts(grouped))
       .catch(() => {});
@@ -242,12 +240,10 @@ export default function App() {
     setPostFormOpen(true);
   };
 
-  const handleAddComment = async (postId: string, comment: Comment) => {
-    // Optimistic add to local state (for comment count in cards)
+  const handleAddComment = (postId: string, comment: Comment) => {
+    // CommunityView has already POSTed the comment; this only syncs local state
+    // so the parent's comment-count UI updates. Posting again here caused duplicates.
     setComments(prev => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
-    try {
-      await createComment(postId, comment.text);
-    } catch { /* comment was added optimistically */ }
   };
 
   const handleMarkNotificationRead = (id: string) =>

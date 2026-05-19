@@ -1,22 +1,18 @@
 import { Router } from 'express';
 import { pool } from '../db';
-import { verifyToken, AuthRequest } from '../middleware/auth';
+import { verifyToken, optionalToken, AuthRequest } from '../middleware/auth';
 
 export const pinsRouter = Router();
 
 // GET /api/posts/pinned  – must be registered BEFORE /:id route
-pinsRouter.get('/pinned', verifyToken, async (req: AuthRequest, res) => {
+// Pins are community-wide: any user pin makes the post pinned for everyone.
+pinsRouter.get('/pinned', optionalToken, async (_req: AuthRequest, res) => {
   try {
-    const userRes = await pool.query('SELECT id FROM users WHERE google_uid = $1', [req.firebaseUid]);
-    if (!userRes.rows[0]) return res.status(404).json({ error: 'User not found' });
-    const userId = userRes.rows[0].id;
-
     const result = await pool.query(
-      `SELECT pp.post_id, pp.region_slug
+      `SELECT pp.post_id, pp.region_slug, MAX(pp.created_at) AS pinned_at
        FROM pinned_posts pp
-       WHERE pp.user_id = $1
-       ORDER BY pp.created_at DESC`,
-      [userId]
+       GROUP BY pp.post_id, pp.region_slug
+       ORDER BY pinned_at DESC`
     );
 
     // Group by region_slug: { [slug]: string[] }
@@ -62,15 +58,12 @@ pinsRouter.post('/:id/pin', verifyToken, async (req: AuthRequest, res) => {
 });
 
 // DELETE /api/posts/:id/pin
+// Community-wide unpin: removes all pin rows for the post so it disappears for everyone.
 pinsRouter.delete('/:id/pin', verifyToken, async (req: AuthRequest, res) => {
   try {
-    const userRes = await pool.query('SELECT id FROM users WHERE google_uid = $1', [req.firebaseUid]);
-    if (!userRes.rows[0]) return res.status(404).json({ error: 'User not found' });
-    const userId = userRes.rows[0].id;
-
     await pool.query(
-      'DELETE FROM pinned_posts WHERE user_id = $1 AND post_id = $2',
-      [userId, req.params.id]
+      'DELETE FROM pinned_posts WHERE post_id = $1',
+      [req.params.id]
     );
 
     return res.json({ pinned: false });
