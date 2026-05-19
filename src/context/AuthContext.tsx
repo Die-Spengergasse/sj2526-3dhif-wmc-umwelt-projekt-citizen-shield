@@ -32,6 +32,7 @@ interface AuthContextValue {
   loading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  refreshDbUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -82,13 +83,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [syncWithBackend]);
 
+  const refreshDbUser = useCallback(async () => {
+    if (!auth.currentUser) return;
+    try {
+      const me: DbUser = await apiFetch('/api/auth/me');
+      setDbUser(me);
+    } catch (err) {
+      console.error('refreshDbUser failed:', err);
+    }
+  }, []);
+
   const signOut = useCallback(async () => {
     await firebaseSignOut(auth);
     setDbUser(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ firebaseUser, dbUser, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ firebaseUser, dbUser, loading, signIn, signOut, refreshDbUser }}>
       {children}
     </AuthContext.Provider>
   );

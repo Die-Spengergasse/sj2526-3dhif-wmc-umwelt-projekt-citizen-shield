@@ -13,7 +13,7 @@ interface FeedViewProps {
   onRegionSelect: (index: number) => void;
   onVote: (postId: string, voteType: 'upvote' | 'downvote') => void;
   onPin?: (post: Post) => void;
-  pinnedPosts?: Record<string, string | string[]>;
+  pinnedPosts?: Record<string, string[]>;
   loadingPosts: boolean;
 }
 
@@ -131,8 +131,8 @@ export const FeedView: React.FC<FeedViewProps> = ({
             </div>
           ) : filtered.length > 0 ? (
             filtered.map((post, i) => {
-              const pinList = pinnedPosts?.[post.regionId];
-              const isPinned = Array.isArray(pinList) ? pinList.includes(post.id) : pinList === post.id;
+              const pinList = pinnedPosts?.[post.regionId] || [];
+              const isPinned = pinList.includes(post.id);
               return (
                 <Reveal key={post.id} delay={i * 60}>
                   <TimelineItem post={post} onVote={onVote} onPin={onPin} isPinnedToCommunity={isPinned} />

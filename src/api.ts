@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import { Region, Post, PostType } from './types';
+import { Region, Post, PostType, Comment } from './types';
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const headers: Record<string, string> = {
@@ -102,6 +102,14 @@ export async function fetchRegionDetail(slug: string): Promise<Region> {
   return mapApiRegionDetail(data);
 }
 
+export async function joinRegion(slug: string): Promise<void> {
+  await apiFetch(`/api/regions/${slug}/join`, { method: 'POST' });
+}
+
+export async function leaveRegion(slug: string): Promise<void> {
+  await apiFetch(`/api/regions/${slug}/join`, { method: 'DELETE' });
+}
+
 // ── Post helpers ──
 
 interface ApiPost {
@@ -110,6 +118,7 @@ interface ApiPost {
   description: string;
   type: PostType;
   imageUrl: string | null;
+  images: string[];
   upvoteCount: number;
   downvoteCount: number;
   status: string;
@@ -147,7 +156,8 @@ function mapApiPost(p: ApiPost): Post {
     title: p.title,
     description: p.description,
     type: p.type,
-    image: p.imageUrl ?? undefined,
+    image: p.images?.[0] ?? p.imageUrl ?? undefined,
+    images: p.images?.length ? p.images : (p.imageUrl ? [p.imageUrl] : []),
     tags: p.tags.length > 0 ? p.tags : undefined,
     upvoteCount: p.upvoteCount,
     downvoteCount: p.downvoteCount,
@@ -166,7 +176,7 @@ export async function createPost(params: {
   title: string;
   description: string;
   type: PostType;
-  imageUrl?: string;
+  imageUrls?: string[];
   tags?: string[];
 }): Promise<{ id: string }> {
   return apiFetch('/api/posts', {
@@ -186,6 +196,35 @@ export async function voteOnPost(postId: string, voteType: 'upvote' | 'downvote'
   });
 }
 
-export async function joinRegion(slug: string): Promise<void> {
-  await apiFetch(`/api/regions/${slug}/join`, { method: 'POST' });
+// ── Pin helpers ──
+
+export async function fetchPinnedPosts(): Promise<Record<string, string[]>> {
+  return apiFetch('/api/posts/pinned');
+}
+
+export async function pinPost(postId: string): Promise<void> {
+  await apiFetch(`/api/posts/${postId}/pin`, { method: 'POST' });
+}
+
+export async function unpinPost(postId: string): Promise<void> {
+  await apiFetch(`/api/posts/${postId}/pin`, { method: 'DELETE' });
+}
+
+// ── Comment helpers ──
+
+export async function fetchComments(postId: string): Promise<Comment[]> {
+  return apiFetch(`/api/posts/${postId}/comments`);
+}
+
+export async function createComment(postId: string, text: string): Promise<Comment> {
+  return apiFetch(`/api/posts/${postId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
+// ── Auth helpers ──
+
+export async function fetchMe() {
+  return apiFetch('/api/auth/me');
 }

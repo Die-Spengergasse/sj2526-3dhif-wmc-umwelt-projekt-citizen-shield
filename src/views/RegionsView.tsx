@@ -1,55 +1,264 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, CheckCircle2, MessageSquare, Radio, Users, Heart,
-  ShieldCheck, MapPin, ShieldAlert } from 'lucide-react';
+  ShieldCheck, MapPin, ShieldAlert, X, Send, LogOut } from 'lucide-react';
 import { S, INTENSITY } from '../design-tokens';
-import { Reveal, AmbientGlow, CountUp, IntensityRing } from '../motion';
+import { Reveal, AmbientGlow, CountUp, IntensityRing, showToast } from '../motion';
 import { RegionSelector } from '../components/RegionSelector';
 import { RegionMapCard } from '../components/RegionMapCard';
 import { ActionButton } from '../components/ActionButton';
 import { TimelineItem } from '../components/TimelineItem';
 import { Region, Post, AppUser } from '../types';
+import { createPost } from '../api';
 
 interface RegionsViewProps {
   regions: Region[];
   posts: Post[];
   user: AppUser | null;
+  activeRegionIdx: number;
+  onRegionIdxChange: (idx: number) => void;
   onSignIn: () => void;
   onOpenPostForm: (user: AppUser | null, signIn: () => void) => void;
   onOpenChat: (regionId: string) => void;
   onVote: (postId: string, voteType: 'upvote' | 'downvote') => void;
   onPin?: (post: Post) => void;
-  pinnedPosts?: Record<string, string | string[]>;
+  pinnedPosts?: Record<string, string[]>;
   onJoinRegion: (slug: string, user: AppUser | null, signIn: () => void) => void;
+  onLeaveRegion: (slug: string) => void;
   joiningRegion: string | null;
   joinedRegions: string[];
   onViewChange?: (view: string) => void;
 }
 
-export const RegionsView: React.FC<RegionsViewProps> = ({
-  regions, posts, user, onSignIn, onOpenPostForm, onOpenChat,
-  onVote, onPin, pinnedPosts, onJoinRegion, joiningRegion, joinedRegions, onViewChange,
-}) => {
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [showSelector, setShowSelector] = useState(false);
-  const [loadingPosts, setLoadingPosts] = useState(false);
-  const prevIdx = useRef(0);
+// ── Emergency Aid Modal ─────────────────────────────────────
+const EmergencyAidModal: React.FC<{
+  region: Region;
+  user: AppUser | null;
+  onSignIn: () => void;
+  onClose: () => void;
+}> = ({ region, user, onSignIn, onClose }) => {
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const region = regions[activeIndex] || regions[0];
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!description.trim()) return;
+    if (!user) { onClose(); onSignIn(); return; }
+    setSubmitting(true);
+    try {
+      await createPost({
+        regionSlug: region.slug,
+        title: `Emergency Aid Request — ${region.name}`,
+        description: description.trim(),
+        type: 'critical',
+        tags: ['emergency-aid'],
+      });
+      showToast({ text: 'Emergency aid request submitted.', tone: 'primary' });
+      onClose();
+    } catch {
+      showToast({ text: 'Submission failed. Please try again.', tone: 'ink' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 440, borderRadius: 20, background: S.paper,
+        border: `1px solid ${S.rule}`, boxShadow: '0 40px 80px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{ padding: '18px 20px', borderBottom: `1px solid ${S.rule}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ fontWeight: 700, fontSize: 16, color: S.ink }}>Request Emergency Aid</h3>
+            <p style={{ fontSize: 11, color: S.muted, marginTop: 2 }}>
+              Region: <span style={{ color: S.primary, fontWeight: 600 }}>{region.name}</span>
+            </p>
+          </div>
+          <button onClick={onClose} style={{
+            width: 32, height: 32, borderRadius: 9, border: `1px solid ${S.rule}`,
+            background: 'transparent', cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', color: S.muted,
+          }}>
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: S.muted, textTransform: 'uppercase',
+              letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Situation Description *</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)}
+              placeholder="Describe the emergency and what kind of aid is needed…"
+              maxLength={1000} rows={4}
+              style={{ width: '100%', background: S.paperHi, border: `1px solid ${S.rule}`,
+                borderRadius: 10, padding: '10px 14px', fontSize: 13, color: S.ink,
+                outline: 'none', resize: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+              onFocus={e => (e.target.style.borderColor = S.primary)}
+              onBlur={e => (e.target.style.borderColor = S.rule)} />
+          </div>
+          <div style={{ padding: '10px 14px', borderRadius: 10,
+            background: 'rgba(164,74,58,0.08)', border: '1px solid rgba(164,74,58,0.2)' }}>
+            <p style={{ fontSize: 12, color: S.primary, lineHeight: 1.5 }}>
+              This will be posted as a <strong>Critical</strong> alert tagged <strong>#emergency-aid</strong> and visible to all community members.
+            </p>
+          </div>
+          <button type="submit" disabled={submitting || !description.trim()} style={{
+            width: '100%', padding: 13, borderRadius: 12, border: 'none',
+            cursor: submitting || !description.trim() ? 'not-allowed' : 'pointer',
+            fontWeight: 700, fontSize: 14, color: '#fff', background: S.primary,
+            opacity: submitting || !description.trim() ? 0.6 : 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontFamily: 'inherit',
+          }}>
+            {submitting ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Request Aid</>}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ── Volunteer Modal ─────────────────────────────────────────
+const VolunteerModal: React.FC<{
+  region: Region;
+  user: AppUser | null;
+  onSignIn: () => void;
+  onClose: () => void;
+}> = ({ region, user, onSignIn, onClose }) => {
+  const [name, setName]       = useState(user?.displayName || '');
+  const [contact, setContact] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !contact.trim()) return;
+    if (!user) { onClose(); onSignIn(); return; }
+    setSubmitting(true);
+    try {
+      await createPost({
+        regionSlug: region.slug,
+        title: `Volunteer Offer — ${region.name}`,
+        description: `Name: ${name.trim()}\nContact: ${contact.trim()}`,
+        type: 'broadcast',
+        tags: ['volunteer'],
+      });
+      showToast({ text: 'Volunteer offer submitted to the hub.', tone: 'primary' });
+      onClose();
+    } catch {
+      showToast({ text: 'Submission failed. Please try again.', tone: 'ink' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 440, borderRadius: 20, background: S.paper,
+        border: `1px solid ${S.rule}`, boxShadow: '0 40px 80px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{ padding: '18px 20px', borderBottom: `1px solid ${S.rule}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ fontWeight: 700, fontSize: 16, color: S.ink }}>Volunteer for Local Hub</h3>
+            <p style={{ fontSize: 11, color: S.muted, marginTop: 2 }}>
+              Region: <span style={{ color: S.secondary, fontWeight: 600 }}>{region.name}</span>
+            </p>
+          </div>
+          <button onClick={onClose} style={{
+            width: 32, height: 32, borderRadius: 9, border: `1px solid ${S.rule}`,
+            background: 'transparent', cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', color: S.muted,
+          }}>
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {[
+            { label: 'Your Name *', value: name, onChange: setName, placeholder: 'Full name or alias', type: 'text' },
+            { label: 'Contact Info *', value: contact, onChange: setContact, placeholder: 'Signal / Telegram / Email…', type: 'text' },
+          ].map(f => (
+            <div key={f.label}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: S.muted, textTransform: 'uppercase',
+                letterSpacing: '0.1em', display: 'block', marginBottom: 6 }}>{f.label}</label>
+              <input type={f.type} value={f.value} onChange={e => f.onChange(e.target.value)}
+                placeholder={f.placeholder}
+                style={{ width: '100%', background: S.paperHi, border: `1px solid ${S.rule}`,
+                  borderRadius: 10, padding: '10px 14px', fontSize: 13, color: S.ink,
+                  outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                onFocus={e => (e.target.style.borderColor = S.secondary)}
+                onBlur={e => (e.target.style.borderColor = S.rule)} />
+            </div>
+          ))}
+          <div style={{ padding: '10px 14px', borderRadius: 10,
+            background: 'rgba(61,107,120,0.08)', border: '1px solid rgba(61,107,120,0.2)' }}>
+            <p style={{ fontSize: 12, color: S.secondary, lineHeight: 1.5 }}>
+              Your offer will be posted as a <strong>Broadcast</strong> tagged <strong>#volunteer</strong> and shared with hub coordinators.
+            </p>
+          </div>
+          <button type="submit" disabled={submitting || !name.trim() || !contact.trim()} style={{
+            width: '100%', padding: 13, borderRadius: 12, border: 'none',
+            cursor: submitting || !name.trim() || !contact.trim() ? 'not-allowed' : 'pointer',
+            fontWeight: 700, fontSize: 14, color: '#fff',
+            background: `linear-gradient(135deg, ${S.secondary} 0%, ${S.secondary}cc 100%)`,
+            opacity: submitting || !name.trim() || !contact.trim() ? 0.6 : 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontFamily: 'inherit',
+          }}>
+            {submitting ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Volunteer</>}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ── Main RegionsView ────────────────────────────────────────
+export const RegionsView: React.FC<RegionsViewProps> = ({
+  regions, posts, user, activeRegionIdx, onRegionIdxChange,
+  onSignIn, onOpenPostForm, onOpenChat,
+  onVote, onPin, pinnedPosts, onJoinRegion, onLeaveRegion, joiningRegion, joinedRegions, onViewChange,
+}) => {
+  const [showSelector,    setShowSelector]    = useState(false);
+  const [loadingPosts,    setLoadingPosts]    = useState(false);
+  const [emergencyOpen,   setEmergencyOpen]   = useState(false);
+  const [volunteerOpen,   setVolunteerOpen]   = useState(false);
+  const prevIdx = useRef(activeRegionIdx);
+
+  const region = regions[activeRegionIdx] || regions[0];
   const regionPosts = posts.filter(p => p.regionId === region?.slug);
   const isJoined = joinedRegions.includes(region?.slug);
   const intensity = region ? (INTENSITY[region.intensity] || INTENSITY.STABLE) : INTENSITY.STABLE;
 
   const go = useCallback((delta: number) => {
-    setActiveIndex(i => (i + delta + regions.length) % regions.length);
-  }, [regions.length]);
+    onRegionIdxChange((activeRegionIdx + delta + regions.length) % regions.length);
+  }, [activeRegionIdx, regions.length, onRegionIdxChange]);
 
   useEffect(() => {
-    if (prevIdx.current === activeIndex) return;
-    prevIdx.current = activeIndex;
+    if (prevIdx.current === activeRegionIdx) return;
+    prevIdx.current = activeRegionIdx;
     setLoadingPosts(true);
     const t = setTimeout(() => setLoadingPosts(false), 500);
     return () => clearTimeout(t);
-  }, [activeIndex]);
+  }, [activeRegionIdx]);
 
   if (!region) return null;
 
@@ -57,7 +266,14 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 36 }}>
       {showSelector && (
         <RegionSelector regions={regions} activeRegionId={region.id}
-          onSelect={i => setActiveIndex(i)} onClose={() => setShowSelector(false)} />
+          onSelect={i => { onRegionIdxChange(i); setShowSelector(false); }}
+          onClose={() => setShowSelector(false)} />
+      )}
+      {emergencyOpen && (
+        <EmergencyAidModal region={region} user={user} onSignIn={onSignIn} onClose={() => setEmergencyOpen(false)} />
+      )}
+      {volunteerOpen && (
+        <VolunteerModal region={region} user={user} onSignIn={onSignIn} onClose={() => setVolunteerOpen(false)} />
       )}
 
       {/* HERO */}
@@ -111,10 +327,10 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
         {/* Dot nav */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 18 }}>
           {regions.map((r, i) => (
-            <button key={r.id} onClick={() => setActiveIndex(i)} style={{
+            <button key={r.id} onClick={() => onRegionIdxChange(i)} style={{
               border: 'none', cursor: 'pointer', padding: 0, borderRadius: 4,
-              width: i === activeIndex ? 30 : 8, height: 6,
-              background: i === activeIndex ? S.ink : 'rgba(31,26,19,0.20)',
+              width: i === activeRegionIdx ? 30 : 8, height: 6,
+              background: i === activeRegionIdx ? S.ink : 'rgba(31,26,19,0.20)',
               transition: 'width 320ms cubic-bezier(.2,.7,.2,1), background 320ms ease',
             }} />
           ))}
@@ -125,25 +341,45 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
         </p>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            onClick={() => isJoined ? null : onJoinRegion(region.slug, user, onSignIn)}
-            disabled={joiningRegion === region.slug}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px',
-              borderRadius: 30, border: isJoined ? `1px solid ${S.tertiary}80` : 'none',
-              cursor: joiningRegion === region.slug ? 'not-allowed' : (isJoined ? 'default' : 'pointer'),
-              fontWeight: 600, fontSize: 13, fontFamily: 'inherit',
-              color: isJoined ? S.tertiary : '#fff',
-              background: isJoined ? 'transparent' : `linear-gradient(135deg, ${S.primary} 0%, ${S.primaryDim} 100%)`,
-              opacity: joiningRegion === region.slug ? 0.6 : 1,
-              boxShadow: isJoined ? 'none' : '0 8px 22px -10px rgba(164,74,58,0.55)',
-            }}>
-            {joiningRegion === region.slug
-              ? <><Loader2 size={14} className="animate-spin" /> Joining…</>
-              : isJoined
-                ? <><CheckCircle2 size={14} /> Joined</>
+          {/* Join / Joined + Leave */}
+          {isJoined ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px',
+                borderRadius: 30, border: `1px solid ${S.tertiary}80`,
+                fontWeight: 600, fontSize: 13, color: S.tertiary,
+              }}>
+                <CheckCircle2 size={14} /> Joined
+              </span>
+              <button onClick={() => onLeaveRegion(region.slug)} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 14px',
+                borderRadius: 30, border: `1px solid ${S.rule}`, cursor: 'pointer',
+                fontWeight: 600, fontSize: 12, fontFamily: 'inherit', background: 'transparent', color: S.muted,
+              }}
+              onMouseEnter={e => { const b = e.currentTarget as HTMLButtonElement; b.style.color = S.primary; b.style.borderColor = S.primary + '60'; }}
+              onMouseLeave={e => { const b = e.currentTarget as HTMLButtonElement; b.style.color = S.muted; b.style.borderColor = S.rule; }}>
+                <LogOut size={13} /> Leave
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => joiningRegion === region.slug ? null : onJoinRegion(region.slug, user, onSignIn)}
+              disabled={joiningRegion === region.slug}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px',
+                borderRadius: 30, border: 'none',
+                cursor: joiningRegion === region.slug ? 'not-allowed' : 'pointer',
+                fontWeight: 600, fontSize: 13, fontFamily: 'inherit',
+                color: '#fff',
+                background: `linear-gradient(135deg, ${S.primary} 0%, ${S.primaryDim} 100%)`,
+                opacity: joiningRegion === region.slug ? 0.6 : 1,
+                boxShadow: '0 8px 22px -10px rgba(164,74,58,0.55)',
+              }}>
+              {joiningRegion === region.slug
+                ? <><Loader2 size={14} className="animate-spin" /> Joining…</>
                 : <>Offer Support</>}
-          </button>
+            </button>
+          )}
           <button onClick={() => onViewChange?.('safety')} style={{
             display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px',
             borderRadius: 30, border: `1px solid ${S.ruleMd}`, cursor: 'pointer',
@@ -215,10 +451,10 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
           { title: 'Emergency contact', icon: <ShieldAlert size={14} />, color: S.primary,
             content: <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18,
               fontWeight: 500, color: S.ink, wordBreak: 'break-all' as const }}>
-              {region.localInfo.emergencyContact}
+              {region.localInfo.emergencyContact || 'Contact local hub'}
             </p> },
           { title: 'Safe zones', icon: <MapPin size={14} />, color: S.secondary,
-            content: (
+            content: region.localInfo.safeZones.length > 0 ? (
               <ul style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 0, margin: 0, listStyle: 'none' }}>
                 {region.localInfo.safeZones.map((z, i) => (
                   <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -228,9 +464,9 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
                   </li>
                 ))}
               </ul>
-            ) },
+            ) : <p style={{ fontSize: 12, color: S.ash }}>None listed yet</p> },
           { title: 'Resources', icon: <Heart size={14} />, color: S.tertiary,
-            content: (
+            content: region.localInfo.resources.length > 0 ? (
               <ul style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 0, margin: 0, listStyle: 'none' }}>
                 {region.localInfo.resources.map((r, i) => (
                   <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -240,7 +476,7 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
                   </li>
                 ))}
               </ul>
-            ) },
+            ) : <p style={{ fontSize: 12, color: S.ash }}>None listed yet</p> },
         ].map((card, i) => (
           <Reveal key={card.title} delay={i * 100}>
             <div style={{ padding: '20px 22px', height: '100%',
@@ -279,7 +515,7 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
           ) : regionPosts.length > 0 ? (
             regionPosts.map((post, i) => {
               const pinList = pinnedPosts?.[post.regionId];
-              const isPinned = Array.isArray(pinList) ? pinList.includes(post.id) : pinList === post.id;
+              const isPinned = Array.isArray(pinList) ? pinList.includes(post.id) : false;
               return (
                 <Reveal key={post.id} delay={i * 60}>
                   <TimelineItem post={post} onVote={onVote} onPin={onPin} isPinnedToCommunity={isPinned} />
@@ -309,10 +545,18 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <ActionButton label="Join regional chat" icon={<MessageSquare size={15} />}
                   color="text-primary" onClick={() => onOpenChat(region.id)} />
-                <ActionButton label="Request emergency aid" icon={<Heart size={15} />} color="text-primary" />
+                <ActionButton label="Request emergency aid" icon={<Heart size={15} />} color="text-primary"
+                  onClick={() => {
+                    if (!user) { onSignIn(); return; }
+                    setEmergencyOpen(true);
+                  }} />
                 <ActionButton label="Share safety update" icon={<Radio size={15} />}
                   color="text-tertiary" onClick={() => onOpenPostForm(user, onSignIn)} />
-                <ActionButton label="Volunteer for local hub" icon={<Users size={15} />} color="text-secondary" />
+                <ActionButton label="Volunteer for local hub" icon={<Users size={15} />} color="text-secondary"
+                  onClick={() => {
+                    if (!user) { onSignIn(); return; }
+                    setVolunteerOpen(true);
+                  }} />
               </div>
             </div>
           </Reveal>

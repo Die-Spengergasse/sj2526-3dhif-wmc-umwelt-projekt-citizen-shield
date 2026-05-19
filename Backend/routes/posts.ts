@@ -30,7 +30,7 @@ postsRouter.get('/', optionalToken, async (req: AuthRequest, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT p.id, p.title, p.description, p.type, p.image_url,
+      `SELECT p.id, p.title, p.description, p.type, p.image_url, p.images,
               p.upvote_count, p.downvote_count, p.post_status,
               p.location_public_lat, p.location_public_lng, p.location_label, p.location_status,
               p.created_at, p.updated_at,
@@ -62,7 +62,7 @@ postsRouter.get('/', optionalToken, async (req: AuthRequest, res) => {
 postsRouter.get('/:id', optionalToken, async (req: AuthRequest, res) => {
   try {
     const result = await pool.query(
-      `SELECT p.id, p.title, p.description, p.type, p.image_url,
+      `SELECT p.id, p.title, p.description, p.type, p.image_url, p.images,
               p.upvote_count, p.downvote_count, p.post_status, p.moderation_note,
               p.location_public_lat, p.location_public_lng, p.location_label, p.location_status,
               p.created_at, p.updated_at,
@@ -97,6 +97,7 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
     description,
     type,
     imageUrl,
+    imageUrls,
     tags,
     locationLat,
     locationLng,
@@ -107,11 +108,17 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
     description: string;
     type: 'critical' | 'info' | 'broadcast';
     imageUrl?: string;
+    imageUrls?: string[];
     tags?: string[];
     locationLat?: number;
     locationLng?: number;
     locationLabel?: string;
   };
+
+  // Normalise to images array – accept either imageUrls[] or legacy imageUrl
+  const images: string[] = imageUrls?.length
+    ? imageUrls
+    : imageUrl ? [imageUrl] : [];
 
   if (!regionSlug || !title || !description || !type) {
     return res.status(400).json({ error: 'regionSlug, title, description, and type are required' });
@@ -160,14 +167,15 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
 
     const postRes = await client.query<{ id: string }>(
       `INSERT INTO posts
-         (region_id, author_id, title, description, type, image_url,
+         (region_id, author_id, title, description, type, image_url, images,
           location_lat, location_lng, location_source, location_distance_m,
           location_public_lat, location_public_lng, location_label, location_status,
           post_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING id`,
       [
-        regionId, userId, title, description, type, imageUrl ?? null,
+        regionId, userId, title, description, type,
+        images[0] ?? null, images,
         locationLat ?? null, locationLng ?? null,
         locationLat != null ? 'manual' : null,
         distanceM,
@@ -236,12 +244,16 @@ postsRouter.delete('/:id', verifyToken, async (req: AuthRequest, res) => {
 });
 
 function mapPost(r: Record<string, unknown>) {
+  const imagesArr = Array.isArray(r.images) && (r.images as string[]).length > 0
+    ? r.images as string[]
+    : r.image_url ? [r.image_url as string] : [];
   return {
     id: r.id,
     title: r.title,
     description: r.description,
     type: r.type,
     imageUrl: r.image_url,
+    images: imagesArr,
     upvoteCount: r.upvote_count,
     downvoteCount: r.downvote_count,
     status: r.post_status,

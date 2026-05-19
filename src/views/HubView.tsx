@@ -7,6 +7,7 @@ import { Region } from '../types';
 interface HubViewProps {
   regions: Region[];
   onViewChange?: (view: string) => void;
+  onRegionSelect?: (idx: number) => void;
 }
 
 const resources = [
@@ -17,7 +18,7 @@ const resources = [
   { title: 'Medical First Response',     cat: 'Medical',  color: '#7a8e5a' },
 ];
 
-export const HubView: React.FC<HubViewProps> = ({ regions, onViewChange }) => {
+export const HubView: React.FC<HubViewProps> = ({ regions, onViewChange, onRegionSelect }) => {
   const [search, setSearch] = useState('');
 
   if (!regions.length) return null;
@@ -134,9 +135,10 @@ export const HubView: React.FC<HubViewProps> = ({ regions, onViewChange }) => {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
             {filtered.map((r, i) => {
               const intensity = INTENSITY[r.intensity] || INTENSITY.STABLE;
+              const regionIdx = regions.indexOf(r);
               return (
                 <Reveal key={r.id} delay={i * 50}>
-                  <button onClick={() => onViewChange?.('regions')} className="lift" style={{
+                  <button onClick={() => { onRegionSelect?.(regionIdx); onViewChange?.('regions'); }} className="lift" style={{
                     width: '100%', textAlign: 'left', position: 'relative', padding: '18px 20px',
                     borderRadius: 14, background: S.paper, border: `1px solid ${S.rule}`,
                     cursor: 'pointer', fontFamily: 'inherit', overflow: 'hidden',

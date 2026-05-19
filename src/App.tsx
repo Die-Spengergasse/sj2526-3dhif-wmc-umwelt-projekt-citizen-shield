@@ -11,9 +11,13 @@ import { SafetyView } from './views/SafetyView';
 import { RegionsView } from './views/RegionsView';
 import { CommunityView } from './views/CommunityView';
 import { GlobeView } from './views/GlobeView';
-import { Toaster, showToast, useNow, parseRelative, formatRelative } from './motion';
+import { Toaster, showToast, useNow, formatRelative } from './motion';
 import { Wordmark } from './components/Wordmark';
-import { fetchRegions, fetchRegionDetail, fetchPosts, createPost, voteOnPost, joinRegion } from './api';
+import {
+  fetchRegions, fetchRegionDetail, fetchPosts, createPost, voteOnPost,
+  joinRegion, leaveRegion, fetchPinnedPosts, pinPost, unpinPost,
+  createComment,
+} from './api';
 import { useAuth } from './context/AuthContext';
 import { S } from './design-tokens';
 import { Post, Region, PostType, Notification, Comment, AppUser } from './types';
@@ -21,7 +25,7 @@ import { Post, Region, PostType, Notification, Comment, AppUser } from './types'
 type View = 'hub' | 'regions' | 'globe' | 'security' | 'safety' | 'community';
 
 export default function App() {
-  const { firebaseUser, dbUser, signIn, signOut } = useAuth();
+  const { firebaseUser, dbUser, signIn, signOut, refreshDbUser } = useAuth();
 
   const user: AppUser | null = firebaseUser
     ? {
@@ -47,7 +51,7 @@ export default function App() {
   const [signInOpen,      setSignInOpen]     = useState(false);
   const [joiningRegion,   setJoiningRegion]  = useState<string | null>(null);
   const [joinedRegions,   setJoinedRegions]  = useState<string[]>([]);
-  const [pinnedPosts,     setPinnedPosts]    = useState<Record<string, string | string[]>>({});
+  const [pinnedPosts,     setPinnedPosts]    = useState<Record<string, string[]>>({});
   const [comments,        setComments]       = useState<Record<string, Comment[]>>({});
   const [notifications,   setNotifications]  = useState<Notification[]>([]);
 
@@ -91,6 +95,14 @@ export default function App() {
     loadPosts(activeRegion.slug);
   }, [activeRegion?.slug, loadPosts]);
 
+  // Load pinned posts from API when user signs in
+  useEffect(() => {
+    if (!user) { setPinnedPosts({}); return; }
+    fetchPinnedPosts()
+      .then(grouped => setPinnedPosts(grouped))
+      .catch(() => {});
+  }, [user?.uid]);
+
   // Scroll to top on view change
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -129,10 +141,12 @@ export default function App() {
       };
     }));
 
-    voteOnPost(postId, voteType).catch(() => {});
+    voteOnPost(postId, voteType)
+      .then(() => refreshDbUser())
+      .catch(() => {});
   };
 
-  const handleNewPost = async (data: { title: string; description: string; type: PostType; imageUrl?: string }) => {
+  const handleNewPost = async (data: { title: string; description: string; type: PostType; imageUrls?: string[] }) => {
     if (!user || !activeRegion) return;
     try {
       await createPost({
@@ -140,14 +154,17 @@ export default function App() {
         title: data.title,
         description: data.description,
         type: data.type,
-        imageUrl: data.imageUrl,
+        imageUrls: data.imageUrls,
       });
       loadPosts(activeRegion.slug);
+      refreshDbUser();
     } catch {
       const fallback: Post = {
         id: 'new-' + Date.now(), regionId: activeRegion.slug, time: 'Just now',
         title: data.title, description: data.description, type: data.type,
-        image: data.imageUrl || undefined, upvoteCount: 0, downvoteCount: 0, userVote: null,
+        image: data.imageUrls?.[0] || undefined,
+        images: data.imageUrls || [],
+        upvoteCount: 0, downvoteCount: 0, userVote: null,
         upvoters: [], downvoters: [], tags: [],
         author: { id: user.uid, displayName: user.displayName, avatarUrl: null, isVerified: user.isVerified },
       };
@@ -160,21 +177,33 @@ export default function App() {
     showToast({ text: 'Report submitted for verification.', tone: 'success' });
   };
 
-  const handlePinPost = (post: Post) => {
+  const handlePinPost = async (post: Post) => {
     if (!user) { setSignInOpen(true); return; }
     const slug = post.regionId;
-    // Compute isPinned from current snapshot — side effects must stay outside the updater
-    // to avoid double-firing in React StrictMode (updaters are called twice in dev).
-    const cur = Array.isArray(pinnedPosts[slug])
-      ? pinnedPosts[slug] as string[]
-      : pinnedPosts[slug] ? [pinnedPosts[slug] as string] : [];
+    const cur = pinnedPosts[slug] || [];
     const isPinned = cur.includes(post.id);
 
+    // Optimistic update
     setPinnedPosts(prev => {
-      const c = Array.isArray(prev[slug]) ? prev[slug] as string[] : (prev[slug] ? [prev[slug] as string] : []);
+      const c = prev[slug] || [];
       const next = c.includes(post.id) ? c.filter(id => id !== post.id) : [post.id, ...c];
       return { ...prev, [slug]: next };
     });
+
+    try {
+      if (isPinned) {
+        await unpinPost(post.id);
+      } else {
+        await pinPost(post.id);
+      }
+    } catch {
+      // Revert on failure
+      setPinnedPosts(prev => {
+        const c = prev[slug] || [];
+        const reverted = isPinned ? [post.id, ...c] : c.filter(id => id !== post.id);
+        return { ...prev, [slug]: reverted };
+      });
+    }
 
     showToast(isPinned
       ? { text: `Unpinned from ${slug?.toUpperCase()} Community.`, tone: 'ink' }
@@ -199,13 +228,26 @@ export default function App() {
     setJoiningRegion(null);
   };
 
+  const handleLeaveRegion = async (slug: string) => {
+    if (!user) return;
+    try {
+      await leaveRegion(slug);
+    } catch { /* optimistic */ }
+    setJoinedRegions(prev => prev.filter(s => s !== slug));
+    showToast({ text: `Left ${slug.toUpperCase()} region.`, tone: 'ink' });
+  };
+
   const handleOpenPostForm = (u: AppUser | null, signInFn: () => void) => {
     if (!u) { signInFn(); return; }
     setPostFormOpen(true);
   };
 
-  const handleAddComment = (postId: string, comment: Comment) => {
+  const handleAddComment = async (postId: string, comment: Comment) => {
+    // Optimistic add to local state (for comment count in cards)
     setComments(prev => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
+    try {
+      await createComment(postId, comment.text);
+    } catch { /* comment was added optimistically */ }
   };
 
   const handleMarkNotificationRead = (id: string) =>
@@ -236,10 +278,14 @@ export default function App() {
       )}
 
       <main style={{ paddingTop: 80, paddingBottom: 120, position: 'relative', minHeight: '100vh' }}>
-        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '40px 24px 80px' }} className="cs-main-inner">
+        <div style={{ padding: '40px 24px 80px' }} className="cs-main-inner">
           <div key={view}>
             {view === 'hub' && (
-              <HubView regions={regions} onViewChange={v => setView(v as View)} />
+              <HubView
+                regions={regions}
+                onViewChange={v => setView(v as View)}
+                onRegionSelect={idx => { setActiveRegionIdx(idx); setView('regions'); }}
+              />
             )}
             {view === 'globe' && (
               <GlobeView
@@ -251,12 +297,15 @@ export default function App() {
             {view === 'regions' && regions.length > 0 && (
               <RegionsView
                 regions={regions} posts={posts} user={user}
+                activeRegionIdx={activeRegionIdx}
+                onRegionIdxChange={setActiveRegionIdx}
                 onSignIn={() => setSignInOpen(true)}
                 onOpenPostForm={handleOpenPostForm}
                 onOpenChat={id => setChatRegion(id)}
                 onVote={handleVote}
                 onPin={handlePinPost} pinnedPosts={pinnedPosts}
                 onJoinRegion={handleJoinRegion}
+                onLeaveRegion={handleLeaveRegion}
                 joiningRegion={joiningRegion}
                 joinedRegions={joinedRegions}
                 onViewChange={v => setView(v as View)}
@@ -272,8 +321,12 @@ export default function App() {
                 loadingPosts={loadingPosts}
               />
             )}
-            {view === 'safety' && activeRegion && (
-              <SafetyView activeRegion={activeRegion} />
+            {view === 'safety' && regions.length > 0 && (
+              <SafetyView
+                regions={regions}
+                activeRegionIdx={activeRegionIdx}
+                onRegionChange={setActiveRegionIdx}
+              />
             )}
             {view === 'community' && (
               <CommunityView

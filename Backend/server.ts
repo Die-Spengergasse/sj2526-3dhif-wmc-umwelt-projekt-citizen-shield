@@ -5,6 +5,8 @@ import { authRouter } from './routes/auth';
 import { regionsRouter } from './routes/regions';
 import { postsRouter } from './routes/posts';
 import { votesRouter } from './routes/votes';
+import { pinsRouter } from './routes/pins';
+import { commentsRouter } from './routes/comments';
 import { moderationRouter } from './routes/moderation';
 import { uploadRouter } from './routes/upload';
 
@@ -19,8 +21,11 @@ app.use(express.json({ limit: '10mb' }));
 
 app.use('/api/auth',       authRouter);
 app.use('/api/regions',    regionsRouter);
+// pinsRouter must come before postsRouter so GET /pinned is matched before GET /:id
+app.use('/api/posts',      pinsRouter);
 app.use('/api/posts',      postsRouter);
-app.use('/api/posts',      votesRouter);   // vote routes: /api/posts/:id/vote
+app.use('/api/posts',      votesRouter);    // /api/posts/:id/vote
+app.use('/api/posts',      commentsRouter); // /api/posts/:id/comments
 app.use('/api/moderation', moderationRouter);
 app.use('/api/upload',     uploadRouter);
 

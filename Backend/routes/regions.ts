@@ -80,6 +80,28 @@ regionsRouter.post('/:slug/join', verifyToken, async (req: AuthRequest, res) => 
   }
 });
 
+// DELETE /api/regions/:slug/join  (leave a region)
+regionsRouter.delete('/:slug/join', verifyToken, async (req: AuthRequest, res) => {
+  try {
+    const userRes = await pool.query('SELECT id FROM users WHERE google_uid = $1', [req.firebaseUid]);
+    if (!userRes.rows[0]) return res.status(404).json({ error: 'User not found' });
+    const userId = userRes.rows[0].id;
+
+    const regionRes = await pool.query('SELECT id FROM regions WHERE slug = $1', [req.params.slug]);
+    if (!regionRes.rows[0]) return res.status(404).json({ error: 'Region not found' });
+    const regionId = regionRes.rows[0].id;
+
+    await pool.query(
+      'DELETE FROM user_regions WHERE user_id = $1 AND region_id = $2',
+      [userId, regionId]
+    );
+    return res.json({ left: true });
+  } catch (err) {
+    console.error('DELETE /regions/:slug/join error', err);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // GET /api/regions/:slug/members
 regionsRouter.get('/:slug/members', async (req, res) => {
   try {

@@ -4,6 +4,7 @@ import { S, INTENSITY } from '../design-tokens';
 import { Reveal, AmbientGlow } from '../motion';
 import { TimelineItem } from '../components/TimelineItem';
 import { Post, Region, Comment, AppUser } from '../types';
+import { fetchComments, createComment } from '../api';
 
 interface DiscussionDrawerProps {
   post: Post;
@@ -18,12 +19,20 @@ interface DiscussionDrawerProps {
 }
 
 const DiscussionDrawer: React.FC<DiscussionDrawerProps> = ({
-  post, region, comments, user, onSignIn, onAddComment, onVote, onPin, onClose,
+  post, region, comments: initialComments, user, onSignIn, onAddComment, onVote, onPin, onClose,
 }) => {
+  const [localComments, setLocalComments] = useState<Comment[]>(initialComments);
   const [commentText, setCommentText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
+
+  // Load comments from API when the drawer opens
+  useEffect(() => {
+    fetchComments(post.id)
+      .then(apiComments => setLocalComments(apiComments))
+      .catch(() => {});
+  }, [post.id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -38,20 +47,26 @@ const DiscussionDrawer: React.FC<DiscussionDrawerProps> = ({
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [comments.length]);
+  }, [localComments.length]);
 
   const handleComment = async () => {
     if (!commentText.trim() || !user || submitting) return;
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 320));
-    onAddComment(post.id, {
-      id: 'c-' + Date.now(),
-      userId: user.uid,
-      name: user.displayName,
-      text: commentText.trim(),
-      time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-      isVerified: user.isVerified,
-    });
+    const text = commentText.trim();
+    try {
+      const saved = await createComment(post.id, text);
+      setLocalComments(prev => [...prev, saved]);
+      onAddComment(post.id, saved); // update parent count
+    } catch {
+      // Fallback: add optimistically
+      const optimistic: Comment = {
+        id: 'c-' + Date.now(), userId: user.uid, name: user.displayName,
+        text, time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+        isVerified: user.isVerified,
+      };
+      setLocalComments(prev => [...prev, optimistic]);
+      onAddComment(post.id, optimistic);
+    }
     setCommentText('');
     setSubmitting(false);
     inputRef.current?.focus();
@@ -115,11 +130,11 @@ const DiscussionDrawer: React.FC<DiscussionDrawerProps> = ({
               Discussion
             </h3>
             <span style={{ fontSize: 11, fontWeight: 700, color: S.ash, textTransform: 'uppercase', letterSpacing: '0.14em' }}>
-              {comments.length} {comments.length === 1 ? 'reply' : 'replies'}
+              {localComments.length} {localComments.length === 1 ? 'reply' : 'replies'}
             </span>
           </div>
 
-          {comments.length === 0 ? (
+          {localComments.length === 0 ? (
             <div style={{ padding: '32px 0 8px', textAlign: 'center' }}>
               <MessageSquare size={32} style={{ color: S.ash, opacity: 0.25, display: 'block', margin: '0 auto 10px' }} />
               <p style={{ fontSize: 11, color: S.ash, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.14em' }}>
@@ -128,7 +143,7 @@ const DiscussionDrawer: React.FC<DiscussionDrawerProps> = ({
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {comments.map((c, i) => (
+              {localComments.map((c, i) => (
                 <Reveal key={c.id} delay={i * 40}>
                   <div style={{ display: 'flex', gap: 12 }}>
                     <div style={{
@@ -199,7 +214,7 @@ const DiscussionDrawer: React.FC<DiscussionDrawerProps> = ({
 interface CommunityViewProps {
   regions: Region[];
   posts: Post[];
-  pinnedPosts: Record<string, string | string[]>;
+  pinnedPosts: Record<string, string[]>;
   comments: Record<string, Comment[]>;
   user: AppUser | null;
   onSignIn: () => void;
@@ -217,8 +232,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const activeRegion = regions.find(r => r.slug === activeTab) || regions[0];
 
   const pinned = useMemo(() => {
-    const raw = pinnedPosts?.[activeTab];
-    const ids = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    const ids = pinnedPosts?.[activeTab] || [];
     return ids.map(id => posts.find(p => p.id === id)).filter(Boolean) as Post[];
   }, [pinnedPosts, posts, activeTab]);
 
@@ -257,8 +271,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       <Reveal>
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }} className="no-scrollbar">
           {regions.map(r => {
-            const raw = pinnedPosts?.[r.slug];
-            const cnt = Array.isArray(raw) ? raw.length : (raw ? 1 : 0);
+            const cnt = (pinnedPosts?.[r.slug] || []).length;
             const intensity = INTENSITY[r.intensity] || INTENSITY.STABLE;
             return (
               <button key={r.slug} onClick={() => setActiveTab(r.slug)} style={{

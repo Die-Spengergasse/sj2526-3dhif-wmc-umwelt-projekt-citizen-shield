@@ -16,6 +16,7 @@ export interface Post {
   description: string;
   type: PostType;
   image?: string;
+  images?: string[];
   tags?: string[];
   icon?: React.ReactNode;
   upvoteCount: number;

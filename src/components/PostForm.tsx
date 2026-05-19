@@ -1,21 +1,23 @@
 import React, { useState, useRef } from 'react';
-import { X, Send, AlertTriangle, Info, Radio, Upload, Loader2, ChevronLeft } from 'lucide-react';
+import { X, Send, AlertTriangle, Info, Radio, Upload, Loader2, ChevronLeft, Plus } from 'lucide-react';
 import { PostType } from '../types';
 import { apiUpload } from '../api';
 import { S } from '../design-tokens';
 
+const MAX_IMAGES = 5;
+
 interface PostFormProps {
   regionSlug: string;
   onClose: () => void;
-  onSubmit: (post: { title: string; description: string; type: PostType; imageUrl?: string }) => void;
+  onSubmit: (post: { title: string; description: string; type: PostType; imageUrls?: string[] }) => void;
 }
 
 export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmit }) => {
   const [title,        setTitle]       = useState('');
   const [description,  setDesc]        = useState('');
   const [type,         setType]        = useState<PostType>('info');
-  const [imageFile,    setImageFile]   = useState<File | null>(null);
-  const [imagePreview, setPreview]     = useState<string | null>(null);
+  const [imageFiles,   setImageFiles]  = useState<File[]>([]);
+  const [previews,     setPreviews]    = useState<string[]>([]);
   const [submitting,   setSubmitting]  = useState(false);
   const [error,        setError]       = useState<string | null>(null);
   const [step,         setStep]        = useState(1);
@@ -28,13 +30,25 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
   } as const;
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (f.size > 10 * 1024 * 1024) { setError('Image must be under 10 MB'); return; }
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { setError('Only JPEG, PNG, WebP allowed'); return; }
+    const files = Array.from(e.target.files ?? []) as File[];
+    if (!files.length) return;
+
+    const remaining = MAX_IMAGES - imageFiles.length;
+    const toAdd = files.slice(0, remaining);
+
+    for (const f of toAdd) {
+      if (f.size > 10 * 1024 * 1024) { setError('Each image must be under 10 MB'); return; }
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { setError('Only JPEG, PNG, WebP allowed'); return; }
+    }
     setError(null);
-    setImageFile(f);
-    setPreview(URL.createObjectURL(f));
+    setImageFiles(prev => [...prev, ...toAdd]);
+    setPreviews(prev => [...prev, ...toAdd.map(f => URL.createObjectURL(f))]);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const removeImage = (idx: number) => {
+    setImageFiles(prev => prev.filter((_, i) => i !== idx));
+    setPreviews(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,9 +58,12 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
     if (description.length < 10) { setError('Description must be at least 10 characters'); return; }
     setSubmitting(true); setError(null);
     try {
-      let imageUrl: string | undefined;
-      if (imageFile) { imageUrl = await apiUpload(imageFile); }
-      await onSubmit({ title: title.trim(), description: description.trim(), type, imageUrl });
+      const imageUrls: string[] = [];
+      for (const file of imageFiles) {
+        const url = await apiUpload(file);
+        imageUrls.push(url);
+      }
+      await onSubmit({ title: title.trim(), description: description.trim(), type, imageUrls: imageUrls.length ? imageUrls : undefined });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Submission failed');
@@ -148,23 +165,40 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
                 </div>
               ))}
 
+              {/* Multi-image upload */}
               <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: S.muted, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 8 }}>Image (Optional)</label>
-                <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFile} style={{ display: 'none' }}/>
-                {imagePreview ? (
-                  <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: `1px solid ${S.border}` }}>
-                    <img src={imagePreview} alt="Preview" style={{ width: '100%', height: 140, objectFit: 'cover' }}/>
-                    <button type="button" onClick={() => { setPreview(null); setImageFile(null); }}
-                      style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: 7, background: 'rgba(0,0,0,0.6)',
-                        border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
-                      <X size={13}/>
-                    </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: S.muted, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    Images (Optional)
+                  </label>
+                  <span style={{ fontSize: 10, color: S.muted }}>{imageFiles.length}/{MAX_IMAGES}</span>
+                </div>
+                <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handleFile} style={{ display: 'none' }}/>
+
+                {previews.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, marginBottom: 8 }}>
+                    {previews.map((src, idx) => (
+                      <div key={idx} style={{ position: 'relative', borderRadius: 10, overflow: 'hidden',
+                        border: `1px solid ${S.border}`, aspectRatio: '4/3' }}>
+                        <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
+                        <button type="button" onClick={() => removeImage(idx)}
+                          style={{ position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 6,
+                            background: 'rgba(0,0,0,0.6)', border: 'none', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+                          <X size={11}/>
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ) : (
+                )}
+
+                {imageFiles.length < MAX_IMAGES && (
                   <button type="button" onClick={() => fileRef.current?.click()}
-                    style={{ width: '100%', padding: 16, borderRadius: 12, border: `2px dashed ${S.border}`, background: 'transparent', cursor: 'pointer',
-                      color: S.muted, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>
-                    <Upload size={16}/> Choose an image
+                    style={{ width: '100%', padding: previews.length ? '10px 16px' : 16, borderRadius: 12,
+                      border: `2px dashed ${S.border}`, background: 'transparent', cursor: 'pointer',
+                      color: S.muted, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      gap: 8, fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>
+                    {previews.length > 0 ? <><Plus size={14}/> Add another</> : <><Upload size={16}/> Choose images</>}
                   </button>
                 )}
               </div>

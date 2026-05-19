@@ -30,17 +30,19 @@ authRouter.post('/sync', verifyToken, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/auth/me
+// GET /api/auth/me  – uses live counts from posts/post_votes tables
 authRouter.get('/me', verifyToken, async (req: AuthRequest, res) => {
   try {
     const result = await pool.query(
       `SELECT u.id, u.google_uid, u.email, u.display_name, u.avatar_url, u.is_verified,
               u.created_at, u.last_active_at,
-              vs.total_posts, vs.qualifying_posts,
-              vs.total_upvotes_received, vs.total_downvotes_received
+              COALESCE(COUNT(DISTINCT p.id), 0)         AS post_count,
+              COALESCE(SUM(p.upvote_count), 0)          AS upvotes_received,
+              COALESCE(SUM(p.downvote_count), 0)        AS downvotes_received
        FROM users u
-       LEFT JOIN user_verification_stats vs ON vs.user_id = u.id
-       WHERE u.google_uid = $1`,
+       LEFT JOIN posts p ON p.author_id = u.id AND p.post_status = 'live'
+       WHERE u.google_uid = $1
+       GROUP BY u.id`,
       [req.firebaseUid]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
@@ -56,10 +58,10 @@ authRouter.get('/me', verifyToken, async (req: AuthRequest, res) => {
       createdAt: u.created_at,
       lastActiveAt: u.last_active_at,
       stats: {
-        totalPosts: u.total_posts,
-        qualifyingPosts: u.qualifying_posts,
-        totalUpvotesReceived: u.total_upvotes_received,
-        totalDownvotesReceived: u.total_downvotes_received,
+        totalPosts: Number(u.post_count),
+        qualifyingPosts: 0,
+        totalUpvotesReceived: Number(u.upvotes_received),
+        totalDownvotesReceived: Number(u.downvotes_received),
       },
     });
   } catch (err) {

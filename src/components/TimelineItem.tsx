@@ -57,7 +57,8 @@ interface TimelineItemProps {
 }
 
 export const TimelineItem: React.FC<TimelineItemProps> = ({ post, onVote, onPin, isPinnedToCommunity }) => {
-  const { id, time, title, description, type, image, tags, upvoteCount, downvoteCount, userVote, author, upvoters = [], downvoters = [] } = post;
+  const { id, time, title, description, type, image, images, tags, upvoteCount, downvoteCount, userVote, author, upvoters = [], downvoters = [] } = post;
+  const displayImages = images?.length ? images : (image ? [image] : []);
   const [openPopover, setOpenPopover] = useState<'upvote' | 'downvote' | null>(null);
 
   const typeConfig = {
@@ -109,13 +110,23 @@ export const TimelineItem: React.FC<TimelineItemProps> = ({ post, onVote, onPin,
           {type === 'broadcast' ? `"${title}"` : title}
         </h4>
 
-        <p style={{ fontSize: 13.5, color: S.inkSoft, lineHeight: 1.65, marginBottom: (image || tags?.length) ? 12 : 0 }}>
+        <p style={{ fontSize: 13.5, color: S.inkSoft, lineHeight: 1.65, marginBottom: (displayImages.length > 0 || tags?.length) ? 12 : 0 }}>
           {description}
         </p>
 
-        {image && (
-          <div style={{ borderRadius: 10, overflow: 'hidden', height: 180, background: S.paperLo, marginBottom: 12 }}>
-            <img src={image} alt={title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer"/>
+        {displayImages.length > 0 && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: displayImages.length === 1 ? '1fr' : 'repeat(auto-fill, minmax(140px, 1fr))',
+            gap: 6, borderRadius: 10, overflow: 'hidden', marginBottom: 12,
+          }}>
+            {displayImages.map((src, i) => (
+              <div key={i} style={{ borderRadius: 10, overflow: 'hidden', background: S.paperLo,
+                height: displayImages.length === 1 ? 180 : 120 }}>
+                <img src={src} alt={`${title} ${i + 1}`}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer"/>
+              </div>
+            ))}
           </div>
         )}
 
