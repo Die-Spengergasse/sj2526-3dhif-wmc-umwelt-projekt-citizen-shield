@@ -278,7 +278,7 @@ export default function App() {
       )}
 
       <main style={{ paddingTop: 80, paddingBottom: 120, position: 'relative', minHeight: '100vh' }}>
-        <div style={{ padding: '40px 24px 80px' }} className="cs-main-inner">
+        <div style={{ paddingBlock: '40px 80px' }} className="cs-main-inner">
           <div key={view}>
             {view === 'hub' && (
               <HubView
@@ -339,34 +339,35 @@ export default function App() {
             )}
           </div>
 
-          <footer style={{ marginTop: 96, paddingTop: 32, borderTop: `1px solid ${S.rule}` }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24 }}>
-              <div style={{ maxWidth: 360 }}>
-                <Wordmark size="lg" />
-                <p style={{ fontSize: 12, color: S.muted, marginTop: 14, lineHeight: 1.6 }}>
-                  A community-led signal network for verified safety information across crisis regions.
-                  Built by and for the people on the ground.
-                </p>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(120px, auto))', gap: '4px 32px' }}>
-                {['Community Guidelines', 'Mutual Aid', 'Emergency Contact', 'Privacy Policy'].map(l => (
-                  <a key={l} href="#" style={{
-                    fontSize: 12, color: S.muted, textDecoration: 'none', fontWeight: 500,
-                    padding: '6px 0', transition: 'color 180ms ease',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.color = S.primary)}
-                  onMouseLeave={e => (e.currentTarget.style.color = S.muted)}>
-                    {l}
-                  </a>
-                ))}
-              </div>
-            </div>
-            <p style={{
-              fontSize: 10, fontWeight: 700, color: S.ash, textTransform: 'uppercase', letterSpacing: '0.18em',
-              marginTop: 24, paddingTop: 16, borderTop: `1px solid ${S.ruleSoft}`,
-            }}>© 2026 · Citizen Shield Network · Community powered</p>
-          </footer>
         </div>
+
+        <footer style={{ marginTop: 96, paddingTop: 32, paddingInline: 'clamp(16px, 4vw, 48px)', borderTop: `1px solid ${S.rule}` }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24 }}>
+            <div style={{ maxWidth: 360 }}>
+              <Wordmark size="lg" />
+              <p style={{ fontSize: 12, color: S.muted, marginTop: 14, lineHeight: 1.6 }}>
+                A community-led signal network for verified safety information across crisis regions.
+                Built by and for the people on the ground.
+              </p>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(120px, auto))', gap: '4px 32px' }}>
+              {['Community Guidelines', 'Mutual Aid', 'Emergency Contact', 'Privacy Policy'].map(l => (
+                <a key={l} href="#" style={{
+                  fontSize: 12, color: S.muted, textDecoration: 'none', fontWeight: 500,
+                  padding: '6px 0', transition: 'color 180ms ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.color = S.primary)}
+                onMouseLeave={e => (e.currentTarget.style.color = S.muted)}>
+                  {l}
+                </a>
+              ))}
+            </div>
+          </div>
+          <p style={{
+            fontSize: 10, fontWeight: 700, color: S.ash, textTransform: 'uppercase', letterSpacing: '0.18em',
+            marginTop: 24, paddingTop: 16, borderTop: `1px solid ${S.ruleSoft}`,
+          }}>© 2026 · Citizen Shield Network · Community powered</p>
+        </footer>
       </main>
 
       <BottomNav currentView={view} onViewChange={v => setView(v as View)} />
