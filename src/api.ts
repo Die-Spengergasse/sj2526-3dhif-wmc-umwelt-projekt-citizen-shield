@@ -59,6 +59,8 @@ interface ApiRegion {
   imageUrl: string | null;
   mapImageUrl: string | null;
   emergencyContact: string | null;
+  centerLat: number | null;
+  centerLng: number | null;
 }
 
 interface ApiRegionDetail extends ApiRegion {
@@ -77,6 +79,8 @@ function mapApiRegion(r: ApiRegion): Region {
     description: r.description ?? '',
     image: r.imageUrl ?? '',
     mapImage: r.mapImageUrl ?? '',
+    centerLat: r.centerLat ?? null,
+    centerLng: r.centerLng ?? null,
     localInfo: {
       emergencyContact: r.emergencyContact ?? '',
       safeZones: [],
@@ -121,7 +125,10 @@ interface ApiPost {
   images: string[];
   upvoteCount: number;
   downvoteCount: number;
+  userVote: 'upvote' | 'downvote' | null;
   status: string;
+  location?: { lat: number; lng: number; label?: string | null; status?: string | null } | null;
+  locationText?: string;
   region: { slug: string; name: string };
   author: {
     id: string;
@@ -161,6 +168,10 @@ function mapApiPost(p: ApiPost): Post {
     tags: p.tags.length > 0 ? p.tags : undefined,
     upvoteCount: p.upvoteCount,
     downvoteCount: p.downvoteCount,
+    userVote: p.userVote ?? null,
+    locationText: p.locationText,
+    locationLat: p.location?.lat,
+    locationLng: p.location?.lng,
     author: p.author,
     createdAt: p.createdAt,
   };
@@ -178,6 +189,9 @@ export async function createPost(params: {
   type: PostType;
   imageUrls?: string[];
   tags?: string[];
+  locationText?: string;
+  locationLat?: number;
+  locationLng?: number;
 }): Promise<{ id: string }> {
   return apiFetch('/api/posts', {
     method: 'POST',
@@ -227,4 +241,37 @@ export async function createComment(postId: string, text: string): Promise<Comme
 
 export async function fetchMe() {
   return apiFetch('/api/auth/me');
+}
+
+// ── Moderation helpers ──
+
+export interface ApiModerationItem {
+  id: string;
+  reason: string;
+  distanceM: number | null;
+  status: string;
+  moderatorNote: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  post: {
+    id: string;
+    title: string;
+    description: string;
+    type: PostType;
+    imageUrl: string | null;
+    createdAt: string;
+    author: { displayName: string; avatarUrl: string | null };
+    region: { slug: string; name: string };
+  };
+}
+
+export async function fetchModerationQueue(): Promise<ApiModerationItem[]> {
+  return apiFetch('/api/moderation');
+}
+
+export async function reviewPost(queueId: string, decision: 'approved' | 'rejected', note?: string): Promise<void> {
+  await apiFetch(`/api/moderation/${queueId}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, note }),
+  });
 }

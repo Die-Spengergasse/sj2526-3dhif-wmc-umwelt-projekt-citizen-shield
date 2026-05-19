@@ -755,6 +755,13 @@ ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
 
 
 -- ============================================================
+-- Idempotente Schema-Erweiterungen (nachträglich hinzugefügt)
+-- ============================================================
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS location_text VARCHAR(255);
+COMMENT ON COLUMN posts.location_text IS 'Manuelle Standort-Beschreibung z.B. "Kathmandu, Thamel District". Alternative zu GPS-Koordinaten.';
+
+
+-- ============================================================
 -- 30. VERIFIKATION
 -- ============================================================
 \echo ''

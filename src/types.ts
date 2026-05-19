@@ -24,6 +24,9 @@ export interface Post {
   userVote?: 'upvote' | 'downvote' | null;
   upvoters?: Voter[];
   downvoters?: Voter[];
+  locationText?: string;
+  locationLat?: number;
+  locationLng?: number;
   author?: {
     id: string;
     displayName: string;
@@ -43,6 +46,8 @@ export interface Region {
   description: string;
   image: string;
   mapImage: string;
+  centerLat?: number | null;
+  centerLng?: number | null;
   localInfo: {
     emergencyContact: string;
     safeZones: string[];

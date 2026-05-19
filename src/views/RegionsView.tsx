@@ -1,35 +1,18 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { ChevronLeft, ChevronRight, Loader2, CheckCircle2, MessageSquare, Radio, Users, Heart,
   ShieldCheck, MapPin, ShieldAlert, X, Send, LogOut } from 'lucide-react';
-import { S, INTENSITY } from '../design-tokens';
+import { S, INTENSITY, REGION_COORDS } from '../design-tokens';
 import { Reveal, AmbientGlow, CountUp, IntensityRing, showToast } from '../motion';
 import { RegionSelector } from '../components/RegionSelector';
-import { RegionMapCard } from '../components/RegionMapCard';
 import { ActionButton } from '../components/ActionButton';
 import { TimelineItem } from '../components/TimelineItem';
 import { Region, Post, AppUser } from '../types';
 import { createPost } from '../api';
 
-interface RegionsViewProps {
-  regions: Region[];
-  posts: Post[];
-  user: AppUser | null;
-  activeRegionIdx: number;
-  onRegionIdxChange: (idx: number) => void;
-  onSignIn: () => void;
-  onOpenPostForm: (user: AppUser | null, signIn: () => void) => void;
-  onOpenChat: (regionId: string) => void;
-  onVote: (postId: string, voteType: 'upvote' | 'downvote') => void;
-  onPin?: (post: Post) => void;
-  pinnedPosts?: Record<string, string[]>;
-  onJoinRegion: (slug: string, user: AppUser | null, signIn: () => void) => void;
-  onLeaveRegion: (slug: string) => void;
-  joiningRegion: string | null;
-  joinedRegions: string[];
-  onViewChange?: (view: string) => void;
-}
-
 // ── Emergency Aid Modal ─────────────────────────────────────
+
 const EmergencyAidModal: React.FC<{
   region: Region;
   user: AppUser | null;
@@ -128,6 +111,7 @@ const EmergencyAidModal: React.FC<{
 };
 
 // ── Volunteer Modal ─────────────────────────────────────────
+
 const VolunteerModal: React.FC<{
   region: Region;
   user: AppUser | null;
@@ -193,13 +177,13 @@ const VolunteerModal: React.FC<{
         </div>
         <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
           {[
-            { label: 'Your Name *', value: name, onChange: setName, placeholder: 'Full name or alias', type: 'text' },
-            { label: 'Contact Info *', value: contact, onChange: setContact, placeholder: 'Signal / Telegram / Email…', type: 'text' },
+            { label: 'Your Name *', value: name, onChange: setName, placeholder: 'Full name or alias' },
+            { label: 'Contact Info *', value: contact, onChange: setContact, placeholder: 'Signal / Telegram / Email…' },
           ].map(f => (
             <div key={f.label}>
               <label style={{ fontSize: 11, fontWeight: 700, color: S.muted, textTransform: 'uppercase',
                 letterSpacing: '0.1em', display: 'block', marginBottom: 6 }}>{f.label}</label>
-              <input type={f.type} value={f.value} onChange={e => f.onChange(e.target.value)}
+              <input type="text" value={f.value} onChange={e => f.onChange(e.target.value)}
                 placeholder={f.placeholder}
                 style={{ width: '100%', background: S.paperHi, border: `1px solid ${S.rule}`,
                   borderRadius: 10, padding: '10px 14px', fontSize: 13, color: S.ink,
@@ -231,7 +215,123 @@ const VolunteerModal: React.FC<{
   );
 };
 
+// ── Posts Map ────────────────────────────────────────────────
+
+interface PostsMapProps {
+  region: Region;
+  posts: Post[];
+  onPostClick: (postId: string) => void;
+}
+
+const PostsMap: React.FC<PostsMapProps> = ({ region, posts, onPostClick }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const coords = REGION_COORDS[region.slug] || { lat: 20, lng: 40, zoom: 4 };
+  const centerLat = (region.centerLat != null ? region.centerLat : coords.lat) as number;
+  const centerLng = (region.centerLng != null ? region.centerLng : coords.lng) as number;
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+
+    const map = L.map(containerRef.current, {
+      zoomControl: true,
+      attributionControl: false,
+      scrollWheelZoom: true,
+    }).setView([centerLat, centerLng], coords.zoom);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
+    // Region center
+    const centerIcon = L.divIcon({
+      className: '',
+      html: `<div style="position:relative;width:28px;height:28px;">
+        <div style="position:absolute;inset:0;border-radius:50%;background:rgba(164,74,58,0.25);animation:warm-pulse 1.8s ease-in-out infinite;"></div>
+        <div style="position:absolute;inset:6px;border-radius:50%;background:#a44a3a;border:3px solid #fbf7ec;box-shadow:0 4px 12px rgba(164,74,58,0.4);"></div>
+      </div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+    });
+    L.marker([centerLat, centerLng], { icon: centerIcon }).addTo(map);
+
+    // Post markers
+    for (const post of posts) {
+      if (post.locationLat == null || post.locationLng == null) continue;
+      const postIcon = L.divIcon({
+        className: '',
+        html: `<div style="width:13px;height:13px;border-radius:50%;background:#3d6b78;border:2.5px solid #fbf7ec;box-shadow:0 2px 8px rgba(61,107,120,0.45);cursor:pointer;transition:transform 150ms;"></div>`,
+        iconSize: [13, 13],
+        iconAnchor: [6, 6],
+      });
+      const marker = L.marker([post.locationLat, post.locationLng], { icon: postIcon });
+      marker.on('click', () => onPostClick(post.id));
+      if (post.title) {
+        marker.bindTooltip(post.title, { direction: 'top', offset: [0, -8], className: '' });
+      }
+      marker.addTo(map);
+    }
+
+    mapRef.current = map;
+    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+  }, [region.slug, centerLat, centerLng, coords.zoom, posts, onPostClick]);
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={containerRef} style={{
+        width: '100%', height: '100%',
+        filter: 'sepia(0.08) saturate(0.88) contrast(0.96)',
+      }} />
+      {/* Legend */}
+      <div style={{
+        position: 'absolute', bottom: 12, left: 12, zIndex: 999,
+        background: 'rgba(251,247,236,0.92)', backdropFilter: 'blur(8px)',
+        padding: '8px 12px', borderRadius: 10, border: `1px solid ${S.rule}`,
+        display: 'flex', flexDirection: 'column', gap: 5, pointerEvents: 'none',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 10, height: 10, borderRadius: '50%', background: S.primary, border: `2px solid ${S.paper}`, display: 'inline-block' }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: S.muted, textTransform: 'uppercase', letterSpacing: '0.14em' }}>Crisis Hub</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: S.secondary, border: `1.5px solid ${S.paper}`, display: 'inline-block' }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: S.muted, textTransform: 'uppercase', letterSpacing: '0.14em' }}>Report</span>
+        </div>
+      </div>
+      {/* Region label */}
+      <div style={{
+        position: 'absolute', top: 12, right: 12, zIndex: 999,
+        background: 'rgba(251,247,236,0.92)', backdropFilter: 'blur(8px)',
+        padding: '5px 11px', borderRadius: 30, border: `1px solid ${S.rule}`, pointerEvents: 'none',
+      }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: S.primary, textTransform: 'uppercase', letterSpacing: '0.16em' }}>
+          {region.name}
+        </span>
+      </div>
+    </div>
+  );
+};
+
 // ── Main RegionsView ────────────────────────────────────────
+
+interface RegionsViewProps {
+  regions: Region[];
+  posts: Post[];
+  user: AppUser | null;
+  activeRegionIdx: number;
+  onRegionIdxChange: (idx: number) => void;
+  onSignIn: () => void;
+  onOpenPostForm: (user: AppUser | null, signIn: () => void) => void;
+  onOpenChat: (regionId: string) => void;
+  onVote: (postId: string, voteType: 'upvote' | 'downvote') => void;
+  onPin?: (post: Post) => void;
+  pinnedPosts?: Record<string, string[]>;
+  onJoinRegion: (slug: string, user: AppUser | null, signIn: () => void) => void;
+  onLeaveRegion: (slug: string) => void;
+  joiningRegion: string | null;
+  joinedRegions: string[];
+  onViewChange?: (view: string) => void;
+}
+
 export const RegionsView: React.FC<RegionsViewProps> = ({
   regions, posts, user, activeRegionIdx, onRegionIdxChange,
   onSignIn, onOpenPostForm, onOpenChat,
@@ -241,12 +341,23 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
   const [loadingPosts,    setLoadingPosts]    = useState(false);
   const [emergencyOpen,   setEmergencyOpen]   = useState(false);
   const [volunteerOpen,   setVolunteerOpen]   = useState(false);
+  const [highlightedPost, setHighlightedPost] = useState<string | null>(null);
+  const [wide, setWide] = useState(() => window.innerWidth >= 900);
+
+  const postRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const rightPanelRef = useRef<HTMLDivElement>(null);
   const prevIdx = useRef(activeRegionIdx);
 
   const region = regions[activeRegionIdx] || regions[0];
   const regionPosts = posts.filter(p => p.regionId === region?.slug);
   const isJoined = joinedRegions.includes(region?.slug);
   const intensity = region ? (INTENSITY[region.intensity] || INTENSITY.STABLE) : INTENSITY.STABLE;
+
+  useEffect(() => {
+    const fn = () => setWide(window.innerWidth >= 900);
+    window.addEventListener('resize', fn);
+    return () => window.removeEventListener('resize', fn);
+  }, []);
 
   const go = useCallback((delta: number) => {
     onRegionIdxChange((activeRegionIdx + delta + regions.length) % regions.length);
@@ -256,9 +367,16 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
     if (prevIdx.current === activeRegionIdx) return;
     prevIdx.current = activeRegionIdx;
     setLoadingPosts(true);
+    setHighlightedPost(null);
     const t = setTimeout(() => setLoadingPosts(false), 500);
     return () => clearTimeout(t);
   }, [activeRegionIdx]);
+
+  const handleMapMarkerClick = useCallback((postId: string) => {
+    setHighlightedPost(postId);
+    const el = postRefs.current[postId];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, []);
 
   if (!region) return null;
 
@@ -289,7 +407,6 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
           <span style={{ fontSize: 11, color: S.ash, fontWeight: 500 }}>Verified by Local Hub · live</span>
         </div>
 
-        {/* Region nav row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18, flexWrap: 'wrap' }}>
           <button onClick={() => go(-1)} aria-label="Previous region" style={{
             width: 42, height: 42, borderRadius: '50%', border: `1px solid ${S.ruleMd}`,
@@ -324,7 +441,6 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
           </button>
         </div>
 
-        {/* Dot nav */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 18 }}>
           {regions.map((r, i) => (
             <button key={r.id} onClick={() => onRegionIdxChange(i)} style={{
@@ -341,7 +457,6 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
         </p>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {/* Join / Joined + Leave */}
           {isJoined ? (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <span style={{
@@ -369,8 +484,7 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
                 display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px',
                 borderRadius: 30, border: 'none',
                 cursor: joiningRegion === region.slug ? 'not-allowed' : 'pointer',
-                fontWeight: 600, fontSize: 13, fontFamily: 'inherit',
-                color: '#fff',
+                fontWeight: 600, fontSize: 13, fontFamily: 'inherit', color: '#fff',
                 background: `linear-gradient(135deg, ${S.primary} 0%, ${S.primaryDim} 100%)`,
                 opacity: joiningRegion === region.slug ? 0.6 : 1,
                 boxShadow: '0 8px 22px -10px rgba(164,74,58,0.55)',
@@ -491,10 +605,60 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
         ))}
       </section>
 
-      {/* TIMELINE + SIDEBAR */}
-      <section style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 24 }} className="cs-grid-lg-2a1">
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 18 }}>
+      {/* MAP + POSTS */}
+      <section style={{
+        display: 'grid',
+        gridTemplateColumns: wide ? '55fr 45fr' : '1fr',
+        gap: 20,
+        alignItems: 'start',
+      }}>
+        {/* Left: sticky map */}
+        <div style={{
+          position: wide ? 'sticky' : 'relative',
+          top: wide ? 80 : 0,
+          height: wide ? 'calc(100vh - 80px)' : 250,
+          borderRadius: 16,
+          overflow: 'hidden',
+          background: S.paper,
+          border: `1px solid ${S.rule}`,
+        }}>
+          <PostsMap
+            key={region.slug}
+            region={region}
+            posts={regionPosts}
+            onPostClick={handleMapMarkerClick}
+          />
+        </div>
+
+        {/* Right: scrollable posts + tools */}
+        <div ref={rightPanelRef} style={{
+          height: wide ? 'calc(100vh - 80px)' : 'auto',
+          overflowY: wide ? 'auto' : 'visible',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          paddingRight: wide ? 4 : 0,
+        }}>
+          {/* Community tools */}
+          <Reveal delay={60}>
+            <div style={{ padding: '16px 18px', background: S.paper, border: `1px solid ${S.rule}`, borderRadius: 16 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: S.ash, textTransform: 'uppercase',
+                letterSpacing: '0.16em', marginBottom: 12 }}>Community tools</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <ActionButton label="Regional chat" icon={<MessageSquare size={14} />}
+                  color="text-primary" onClick={() => onOpenChat(region.id)} />
+                <ActionButton label="Emergency aid" icon={<Heart size={14} />} color="text-primary"
+                  onClick={() => { if (!user) { onSignIn(); return; } setEmergencyOpen(true); }} />
+                <ActionButton label="Share update" icon={<Radio size={14} />}
+                  color="text-tertiary" onClick={() => onOpenPostForm(user, onSignIn)} />
+                <ActionButton label="Volunteer" icon={<Users size={14} />} color="text-secondary"
+                  onClick={() => { if (!user) { onSignIn(); return; } setVolunteerOpen(true); }} />
+              </div>
+            </div>
+          </Reveal>
+
+          {/* Posts header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <p style={{ fontSize: 11, fontWeight: 700, color: S.ash, textTransform: 'uppercase', letterSpacing: '0.16em' }}>
               Community reports
             </p>
@@ -502,6 +666,8 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
               {regionPosts.length} signals
             </span>
           </div>
+
+          {/* Posts list */}
           {loadingPosts ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {[0, 1, 2].map(i => (
@@ -517,9 +683,17 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
               const pinList = pinnedPosts?.[post.regionId];
               const isPinned = Array.isArray(pinList) ? pinList.includes(post.id) : false;
               return (
-                <Reveal key={post.id} delay={i * 60}>
-                  <TimelineItem post={post} onVote={onVote} onPin={onPin} isPinnedToCommunity={isPinned} />
-                </Reveal>
+                <div key={post.id} ref={el => { postRefs.current[post.id] = el; }}>
+                  <Reveal delay={i * 60}>
+                    <TimelineItem
+                      post={post}
+                      onVote={onVote}
+                      onPin={onPin}
+                      isPinnedToCommunity={isPinned}
+                      highlighted={highlightedPost === post.id}
+                    />
+                  </Reveal>
+                </div>
               );
             })
           ) : (
@@ -531,38 +705,10 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
               </p>
             </div>
           )}
-        </div>
 
-        <aside style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Reveal delay={120}>
-            <RegionMapCard region={region} />
-          </Reveal>
-
+          {/* Safety tips */}
           <Reveal delay={180}>
-            <div style={{ padding: 22, background: S.paper, border: `1px solid ${S.rule}`, borderRadius: 16 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: S.ash, textTransform: 'uppercase',
-                letterSpacing: '0.16em', marginBottom: 18 }}>Community tools</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <ActionButton label="Join regional chat" icon={<MessageSquare size={15} />}
-                  color="text-primary" onClick={() => onOpenChat(region.id)} />
-                <ActionButton label="Request emergency aid" icon={<Heart size={15} />} color="text-primary"
-                  onClick={() => {
-                    if (!user) { onSignIn(); return; }
-                    setEmergencyOpen(true);
-                  }} />
-                <ActionButton label="Share safety update" icon={<Radio size={15} />}
-                  color="text-tertiary" onClick={() => onOpenPostForm(user, onSignIn)} />
-                <ActionButton label="Volunteer for local hub" icon={<Users size={15} />} color="text-secondary"
-                  onClick={() => {
-                    if (!user) { onSignIn(); return; }
-                    setVolunteerOpen(true);
-                  }} />
-              </div>
-            </div>
-          </Reveal>
-
-          <Reveal delay={240}>
-            <div style={{ padding: 22, background: S.paper, border: `1px solid ${S.rule}`, borderRadius: 16 }}>
+            <div style={{ padding: 20, background: S.paper, border: `1px solid ${S.rule}`, borderRadius: 16 }}>
               <p style={{ fontSize: 10, fontWeight: 700, color: S.primary, textTransform: 'uppercase',
                 letterSpacing: '0.18em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <ShieldCheck size={11} /> Safety · level 1
@@ -580,7 +726,7 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
               </ul>
             </div>
           </Reveal>
-        </aside>
+        </div>
       </section>
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Globe, Map as MapIcon, Zap, Radio, ShieldCheck, Users,
+  Globe, Map as MapIcon, Zap, Radio, ShieldCheck, Users, ShieldAlert,
   Bell, LogIn, LogOut, ChevronDown, CircleCheck,
 } from 'lucide-react';
 import { S } from '../design-tokens';
@@ -37,12 +37,13 @@ export const TopNav: React.FC<TopNavProps> = ({
   }, []);
 
   const navItems = [
-    { id: 'hub',       label: 'Hub',       icon: <Globe size={14}/> },
-    { id: 'regions',   label: 'Regions',   icon: <MapIcon size={14}/> },
-    { id: 'globe',     label: 'Globe',     icon: <Zap size={14}/> },
-    { id: 'security',  label: 'Feed',      icon: <Radio size={14}/> },
-    { id: 'safety',    label: 'Safety',    icon: <ShieldCheck size={14}/> },
-    { id: 'community', label: 'Community', icon: <Users size={14}/> },
+    { id: 'hub',        label: 'Hub',       icon: <Globe size={14}/> },
+    { id: 'regions',    label: 'Regions',   icon: <MapIcon size={14}/> },
+    { id: 'globe',      label: 'Globe',     icon: <Zap size={14}/> },
+    { id: 'security',   label: 'Feed',      icon: <Radio size={14}/> },
+    { id: 'safety',     label: 'Safety',    icon: <ShieldCheck size={14}/> },
+    { id: 'community',  label: 'Community', icon: <Users size={14}/> },
+    ...(user ? [{ id: 'moderation', label: 'Review', icon: <ShieldAlert size={14}/> }] : []),
   ];
 
   return (

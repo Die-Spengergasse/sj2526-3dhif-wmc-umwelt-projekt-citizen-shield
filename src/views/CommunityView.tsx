@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import ReactDOM from 'react-dom';
 import { Flag, X, Send, LogIn, Loader2, MessageSquare, ChevronRight, CircleCheck } from 'lucide-react';
 import { S, INTENSITY } from '../design-tokens';
 import { Reveal, AmbientGlow } from '../motion';
@@ -72,7 +73,7 @@ const DiscussionDrawer: React.FC<DiscussionDrawerProps> = ({
     inputRef.current?.focus();
   };
 
-  return (
+  return ReactDOM.createPortal(
     <>
       <div onClick={onClose} className="reveal-fade" style={{
         position: 'fixed', inset: 0, zIndex: 180,
@@ -207,7 +208,8 @@ const DiscussionDrawer: React.FC<DiscussionDrawerProps> = ({
           )}
         </div>
       </aside>
-    </>
+    </>,
+    document.body
   );
 };
 
@@ -284,12 +286,14 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: intensity.color }} />
                 {r.name}
-                <span style={{
-                  fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 30,
-                  background: activeTab === r.slug ? 'rgba(251,247,236,0.18)' : S.paperHi,
-                  color: activeTab === r.slug ? S.paper : S.muted,
-                  letterSpacing: '0.12em',
-                }}>{cnt}</span>
+                {cnt > 0 && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 30,
+                    background: activeTab === r.slug ? 'rgba(251,247,236,0.18)' : S.paperHi,
+                    color: activeTab === r.slug ? S.paper : S.muted,
+                    letterSpacing: '0.12em',
+                  }}>{cnt}</span>
+                )}
               </button>
             );
           })}

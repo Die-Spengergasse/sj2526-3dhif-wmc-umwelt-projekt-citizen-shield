@@ -13,16 +13,11 @@ async function isModerator(userId: string): Promise<boolean> {
   return res.rows.length > 0;
 }
 
-// GET /api/moderation  – pending queue (moderators only)
+// GET /api/moderation  – pending queue (all logged-in users for now)
 moderationRouter.get('/', verifyToken, async (req: AuthRequest, res) => {
   try {
     const userRes = await pool.query('SELECT id FROM users WHERE google_uid = $1', [req.firebaseUid]);
     if (!userRes.rows[0]) return res.status(404).json({ error: 'User not found' });
-    const userId = userRes.rows[0].id;
-
-    if (!(await isModerator(userId))) {
-      return res.status(403).json({ error: 'Moderator role required' });
-    }
 
     const result = await pool.query(
       `SELECT mq.id, mq.reason, mq.distance_m, mq.status, mq.moderator_note,
@@ -68,7 +63,7 @@ moderationRouter.get('/', verifyToken, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/moderation/:id/review  – approve or reject
+// POST /api/moderation/:id/review  – approve or reject (all logged-in users for now)
 moderationRouter.post('/:id/review', verifyToken, async (req: AuthRequest, res) => {
   const { decision, note } = req.body as { decision: 'approved' | 'rejected'; note?: string };
 
@@ -86,11 +81,6 @@ moderationRouter.post('/:id/review', verifyToken, async (req: AuthRequest, res) 
       return res.status(404).json({ error: 'User not found' });
     }
     const userId = userRes.rows[0].id;
-
-    if (!(await isModerator(userId))) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Moderator role required' });
-    }
 
     const queueRes = await client.query(
       `SELECT id, post_id FROM moderation_queue WHERE id = $1 AND status = 'pending'`,

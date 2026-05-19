@@ -1,33 +1,101 @@
-import React, { useState, useRef } from 'react';
-import { X, Send, AlertTriangle, Info, Radio, Upload, Loader2, ChevronLeft, Plus } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Send, AlertTriangle, Info, Radio, Upload, Loader2, ChevronLeft, Plus, MapPin } from 'lucide-react';
 import { PostType } from '../types';
 import { apiUpload } from '../api';
 import { S } from '../design-tokens';
 
 const MAX_IMAGES = 5;
 
+interface NominatimResult {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+}
+
 interface PostFormProps {
   regionSlug: string;
   onClose: () => void;
-  onSubmit: (post: { title: string; description: string; type: PostType; imageUrls?: string[] }) => void;
+  onSubmit: (post: {
+    title: string;
+    description: string;
+    type: PostType;
+    imageUrls?: string[];
+    locationText?: string;
+    locationLat?: number;
+    locationLng?: number;
+  }) => void;
 }
 
 export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmit }) => {
-  const [title,        setTitle]       = useState('');
-  const [description,  setDesc]        = useState('');
-  const [type,         setType]        = useState<PostType>('info');
-  const [imageFiles,   setImageFiles]  = useState<File[]>([]);
-  const [previews,     setPreviews]    = useState<string[]>([]);
-  const [submitting,   setSubmitting]  = useState(false);
-  const [error,        setError]       = useState<string | null>(null);
-  const [step,         setStep]        = useState(1);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [title,        setTitle]        = useState('');
+  const [description,  setDesc]         = useState('');
+  const [type,         setType]         = useState<PostType>('info');
+  const [locationText, setLocationText] = useState('');
+  const [locationLat,  setLocationLat]  = useState<number | undefined>();
+  const [locationLng,  setLocationLng]  = useState<number | undefined>();
+  const [suggestions,  setSuggestions]  = useState<NominatimResult[]>([]);
+  const [isSearching,  setIsSearching]  = useState(false);
+  const [imageFiles,   setImageFiles]   = useState<File[]>([]);
+  const [previews,     setPreviews]     = useState<string[]>([]);
+  const [submitting,   setSubmitting]   = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [step,         setStep]         = useState(1);
+
+  const fileRef     = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const locationRef = useRef<HTMLDivElement>(null);
 
   const typeConfig = {
     critical:  { color: S.primary,   bg: `${S.primary}18`,   Icon: AlertTriangle, label: 'Critical',  desc: 'Urgent safety alerts, immediate dangers or critical changes.' },
     info:      { color: S.secondary, bg: `${S.secondary}18`, Icon: Info,          label: 'Info',      desc: 'General updates, resource locations and situational reports.' },
     broadcast: { color: S.tertiary,  bg: `${S.tertiary}18`,  Icon: Radio,         label: 'Broadcast', desc: 'Community announcements, coordination and morale messages.' },
   } as const;
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    if (!suggestions.length) return;
+    const h = (e: MouseEvent) => {
+      if (locationRef.current && !locationRef.current.contains(e.target as Node)) {
+        setSuggestions([]);
+      }
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [suggestions.length]);
+
+  const handleLocationInput = (value: string) => {
+    setLocationText(value);
+    // Clear previously selected coordinates when user types again
+    setLocationLat(undefined);
+    setLocationLng(undefined);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!value.trim() || value.length < 2) { setSuggestions([]); return; }
+
+    debounceRef.current = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(value)}&format=json&limit=5`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data: NominatimResult[] = await res.json();
+        setSuggestions(data);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 400);
+  };
+
+  const handleSuggestionSelect = (s: NominatimResult) => {
+    setLocationText(s.display_name);
+    setLocationLat(parseFloat(s.lat));
+    setLocationLng(parseFloat(s.lon));
+    setSuggestions([]);
+  };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []) as File[];
@@ -63,7 +131,15 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
         const url = await apiUpload(file);
         imageUrls.push(url);
       }
-      await onSubmit({ title: title.trim(), description: description.trim(), type, imageUrls: imageUrls.length ? imageUrls : undefined });
+      await onSubmit({
+        title: title.trim(),
+        description: description.trim(),
+        type,
+        imageUrls: imageUrls.length ? imageUrls : undefined,
+        locationText: locationText.trim() || undefined,
+        locationLat,
+        locationLng,
+      });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Submission failed');
@@ -164,6 +240,78 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
                   )}
                 </div>
               ))}
+
+              {/* Location autocomplete */}
+              <div ref={locationRef} style={{ position: 'relative' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: S.muted, textTransform: 'uppercase',
+                    letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <MapPin size={11}/> Location (Optional)
+                  </label>
+                  {locationLat != null && (
+                    <span style={{ fontSize: 10, color: S.secondary, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <MapPin size={9}/> GPS set
+                    </span>
+                  )}
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={locationText}
+                    onChange={e => handleLocationInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Escape') setSuggestions([]); }}
+                    placeholder="Search a city, district or address…"
+                    maxLength={255}
+                    style={{
+                      width: '100%', background: S.surf2, border: `1px solid ${S.border}`,
+                      borderRadius: suggestions.length ? '10px 10px 0 0' : 10,
+                      padding: '10px 38px 10px 14px', fontSize: 13, fontWeight: 500,
+                      color: S.text, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+                    }}
+                    onFocus={e => e.target.style.borderColor = S.primary}
+                    onBlur={e => { if (!suggestions.length) e.target.style.borderColor = S.border; }}
+                  />
+                  {/* Spinner or pin icon */}
+                  <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: S.muted, pointerEvents: 'none' }}>
+                    {isSearching
+                      ? <Loader2 size={14} className="animate-spin"/>
+                      : <MapPin size={14}/>
+                    }
+                  </div>
+                </div>
+
+                {/* Suggestions dropdown */}
+                {suggestions.length > 0 && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                    background: S.surf2, border: `1px solid ${S.primary}`,
+                    borderTop: 'none', borderRadius: '0 0 10px 10px',
+                    boxShadow: '0 12px 32px -8px rgba(31,26,19,0.25)',
+                    maxHeight: 200, overflowY: 'auto',
+                  }}>
+                    {suggestions.map((s, i) => (
+                      <button
+                        key={s.place_id}
+                        type="button"
+                        onMouseDown={e => { e.preventDefault(); handleSuggestionSelect(s); }}
+                        style={{
+                          width: '100%', textAlign: 'left', padding: '10px 14px',
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          fontFamily: 'inherit', fontSize: 12.5, color: S.text,
+                          borderBottom: i < suggestions.length - 1 ? `1px solid ${S.border}` : 'none',
+                          display: 'flex', alignItems: 'flex-start', gap: 8,
+                          transition: 'background 120ms ease',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = S.surf3)}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <MapPin size={12} style={{ color: S.primary, flexShrink: 0, marginTop: 2 }}/>
+                        <span style={{ lineHeight: 1.45 }}>{s.display_name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Multi-image upload */}
               <div>

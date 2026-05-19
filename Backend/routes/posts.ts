@@ -14,7 +14,14 @@ postsRouter.get('/', optionalToken, async (req: AuthRequest, res) => {
     tag,
   } = req.query as Record<string, string>;
 
-  const params: unknown[] = [parseInt(limit, 10), parseInt(offset, 10), status];
+  let dbUserId: string | null = null;
+  if (req.firebaseUid) {
+    const ur = await pool.query('SELECT id FROM users WHERE google_uid = $1', [req.firebaseUid]);
+    dbUserId = ur.rows[0]?.id ?? null;
+  }
+
+  // $1=limit, $2=offset, $3=status, $4=dbUserId
+  const params: unknown[] = [parseInt(limit, 10), parseInt(offset, 10), status, dbUserId];
   const conditions: string[] = ['p.post_status = $3'];
 
   if (regionSlug) {
@@ -33,6 +40,7 @@ postsRouter.get('/', optionalToken, async (req: AuthRequest, res) => {
       `SELECT p.id, p.title, p.description, p.type, p.image_url, p.images,
               p.upvote_count, p.downvote_count, p.post_status,
               p.location_public_lat, p.location_public_lng, p.location_label, p.location_status,
+              p.location_text,
               p.created_at, p.updated_at,
               r.slug  AS region_slug,
               r.name  AS region_name,
@@ -40,7 +48,8 @@ postsRouter.get('/', optionalToken, async (req: AuthRequest, res) => {
               u.display_name AS author_name,
               u.avatar_url   AS author_avatar,
               u.is_verified  AS author_verified,
-              COALESCE(json_agg(DISTINCT pt.tag) FILTER (WHERE pt.tag IS NOT NULL), '[]') AS tags
+              COALESCE(json_agg(DISTINCT pt.tag) FILTER (WHERE pt.tag IS NOT NULL), '[]') AS tags,
+              (SELECT vote_type FROM post_votes WHERE post_id = p.id AND voter_id = $4 LIMIT 1) AS user_vote
        FROM posts p
        JOIN regions r ON r.id = p.region_id
        JOIN users  u ON u.id = p.author_id
@@ -61,10 +70,17 @@ postsRouter.get('/', optionalToken, async (req: AuthRequest, res) => {
 // GET /api/posts/:id
 postsRouter.get('/:id', optionalToken, async (req: AuthRequest, res) => {
   try {
+    let dbUserId: string | null = null;
+    if (req.firebaseUid) {
+      const ur = await pool.query('SELECT id FROM users WHERE google_uid = $1', [req.firebaseUid]);
+      dbUserId = ur.rows[0]?.id ?? null;
+    }
+
     const result = await pool.query(
       `SELECT p.id, p.title, p.description, p.type, p.image_url, p.images,
               p.upvote_count, p.downvote_count, p.post_status, p.moderation_note,
               p.location_public_lat, p.location_public_lng, p.location_label, p.location_status,
+              p.location_text,
               p.created_at, p.updated_at,
               r.slug  AS region_slug,
               r.name  AS region_name,
@@ -72,14 +88,15 @@ postsRouter.get('/:id', optionalToken, async (req: AuthRequest, res) => {
               u.display_name AS author_name,
               u.avatar_url   AS author_avatar,
               u.is_verified  AS author_verified,
-              COALESCE(json_agg(DISTINCT pt.tag) FILTER (WHERE pt.tag IS NOT NULL), '[]') AS tags
+              COALESCE(json_agg(DISTINCT pt.tag) FILTER (WHERE pt.tag IS NOT NULL), '[]') AS tags,
+              (SELECT vote_type FROM post_votes WHERE post_id = p.id AND voter_id = $2 LIMIT 1) AS user_vote
        FROM posts p
        JOIN regions r ON r.id = p.region_id
        JOIN users  u ON u.id = p.author_id
        LEFT JOIN post_tags pt ON pt.post_id = p.id
        WHERE p.id = $1
        GROUP BY p.id, r.slug, r.name, u.id`,
-      [req.params.id]
+      [req.params.id, dbUserId]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Post not found' });
     return res.json(mapPost(result.rows[0]));
@@ -102,6 +119,7 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
     locationLat,
     locationLng,
     locationLabel,
+    locationText,
   } = req.body as {
     regionSlug: string;
     title: string;
@@ -113,6 +131,7 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
     locationLat?: number;
     locationLng?: number;
     locationLabel?: string;
+    locationText?: string;
   };
 
   // Normalise to images array – accept either imageUrls[] or legacy imageUrl
@@ -170,8 +189,8 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
          (region_id, author_id, title, description, type, image_url, images,
           location_lat, location_lng, location_source, location_distance_m,
           location_public_lat, location_public_lng, location_label, location_status,
-          post_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+          location_text, post_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING id`,
       [
         regionId, userId, title, description, type,
@@ -181,6 +200,7 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
         distanceM,
         publicLat, publicLng, locationLabel ?? null,
         locStatus,
+        locationText?.trim() || null,
         postStatus,
       ]
     );
@@ -256,6 +276,7 @@ function mapPost(r: Record<string, unknown>) {
     images: imagesArr,
     upvoteCount: r.upvote_count,
     downvoteCount: r.downvote_count,
+    userVote: (r.user_vote as string | null) ?? null,
     status: r.post_status,
     moderationNote: r.moderation_note ?? undefined,
     location: r.location_public_lat != null
@@ -266,6 +287,7 @@ function mapPost(r: Record<string, unknown>) {
           status: r.location_status,
         }
       : null,
+    locationText: (r.location_text as string | null) ?? undefined,
     region: { slug: r.region_slug, name: r.region_name },
     author: {
       id: r.author_id,

@@ -9,7 +9,8 @@ regionsRouter.get('/', async (_req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, slug, name, intensity, active_hubs, connectivity,
-              description, image_url, map_image_url, emergency_contact, updated_at
+              description, image_url, map_image_url, emergency_contact,
+              center_lat, center_lng, updated_at
        FROM regions
        ORDER BY
          CASE intensity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'ALERT' THEN 3 ELSE 4 END,
@@ -27,7 +28,8 @@ regionsRouter.get('/:slug', async (req, res) => {
   try {
     const regionRes = await pool.query(
       `SELECT id, slug, name, intensity, active_hubs, connectivity,
-              description, image_url, map_image_url, emergency_contact, updated_at
+              description, image_url, map_image_url, emergency_contact,
+              center_lat, center_lng, updated_at
        FROM regions WHERE slug = $1`,
       [req.params.slug]
     );
@@ -133,6 +135,8 @@ function mapRegion(r: Record<string, unknown>) {
     imageUrl: r.image_url,
     mapImageUrl: r.map_image_url,
     emergencyContact: r.emergency_contact,
+    centerLat: r.center_lat ?? null,
+    centerLng: r.center_lng ?? null,
     updatedAt: r.updated_at,
   };
 }

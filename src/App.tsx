@@ -11,6 +11,7 @@ import { SafetyView } from './views/SafetyView';
 import { RegionsView } from './views/RegionsView';
 import { CommunityView } from './views/CommunityView';
 import { GlobeView } from './views/GlobeView';
+import { ModerationView } from './views/ModerationView';
 import { Toaster, showToast, useNow, formatRelative } from './motion';
 import { Wordmark } from './components/Wordmark';
 import {
@@ -21,7 +22,7 @@ import { useAuth } from './context/AuthContext';
 import { S } from './design-tokens';
 import { Post, Region, PostType, Notification, Comment, AppUser } from './types';
 
-type View = 'hub' | 'regions' | 'globe' | 'security' | 'safety' | 'community';
+type View = 'hub' | 'regions' | 'globe' | 'security' | 'safety' | 'community' | 'moderation';
 
 export default function App() {
   const { firebaseUser, dbUser, signIn, signOut, refreshDbUser } = useAuth();
@@ -61,6 +62,9 @@ export default function App() {
   }));
 
   const activeRegion = regions[activeRegionIdx] || regions[0];
+
+  // Refresh user stats on mount so numbers are always live
+  useEffect(() => { refreshDbUser(); }, [refreshDbUser]);
 
   // Load regions on mount
   useEffect(() => {
@@ -144,35 +148,31 @@ export default function App() {
       .catch(() => {});
   };
 
-  const handleNewPost = async (data: { title: string; description: string; type: PostType; imageUrls?: string[] }) => {
+  const handleNewPost = async (data: { title: string; description: string; type: PostType; imageUrls?: string[]; locationText?: string; locationLat?: number; locationLng?: number }) => {
     if (!user || !activeRegion) return;
     try {
-      await createPost({
+      const result = await createPost({
         regionSlug: activeRegion.slug,
         title: data.title,
         description: data.description,
         type: data.type,
         imageUrls: data.imageUrls,
+        locationText: data.locationText,
+        locationLat: data.locationLat,
+        locationLng: data.locationLng,
       });
+      console.log('[handleNewPost] createPost response:', result);
       loadPosts(activeRegion.slug);
       refreshDbUser();
-    } catch {
-      const fallback: Post = {
-        id: 'new-' + Date.now(), regionId: activeRegion.slug, time: 'Just now',
-        title: data.title, description: data.description, type: data.type,
-        image: data.imageUrls?.[0] || undefined,
-        images: data.imageUrls || [],
-        upvoteCount: 0, downvoteCount: 0, userVote: null,
-        upvoters: [], downvoters: [], tags: [],
-        author: { id: user.uid, displayName: user.displayName, avatarUrl: null, isVerified: user.isVerified },
-      };
-      setPosts(prev => [fallback, ...prev]);
+      setNotifications(prev => [
+        { id: 'n-new-' + Date.now(), text: `Your report "${data.title}" submitted for verification`, _at: Date.now(), read: false, time: 'Just now' },
+        ...prev,
+      ]);
+      showToast({ text: 'Report submitted for verification.', tone: 'success' });
+    } catch (err) {
+      console.error('[handleNewPost] createPost failed:', err);
+      showToast({ text: err instanceof Error ? err.message : 'Failed to submit report. Please try again.', tone: 'ink' });
     }
-    setNotifications(prev => [
-      { id: 'n-new-' + Date.now(), text: `Your report "${data.title}" submitted for verification`, _at: Date.now(), read: false, time: 'Just now' },
-      ...prev,
-    ]);
-    showToast({ text: 'Report submitted for verification.', tone: 'success' });
   };
 
   const handlePinPost = async (post: Post) => {
@@ -267,7 +267,11 @@ export default function App() {
 
       {signInOpen   && <SignInModal onClose={() => setSignInOpen(false)} onSignIn={signIn} />}
       {postFormOpen && activeRegion && (
-        <PostForm regionSlug={activeRegion.slug} onClose={() => setPostFormOpen(false)} onSubmit={handleNewPost} />
+        <PostForm
+          regionSlug={activeRegion.slug}
+          onClose={() => setPostFormOpen(false)}
+          onSubmit={handleNewPost}
+        />
       )}
       {chatRegion && (
         <Chat region={chatRegion} currentUser={user} onClose={() => setChatRegion(null)} />
@@ -332,6 +336,9 @@ export default function App() {
                 onAddComment={handleAddComment} onVote={handleVote}
                 onPin={handlePinPost}
               />
+            )}
+            {view === 'moderation' && (
+              <ModerationView user={user} onSignIn={() => setSignInOpen(true)} />
             )}
           </div>
 
