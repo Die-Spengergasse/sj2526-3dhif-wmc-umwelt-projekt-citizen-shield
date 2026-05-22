@@ -20,7 +20,7 @@ import {
 } from './api';
 import { useAuth } from './context/AuthContext';
 import { S } from './design-tokens';
-import { Post, Region, PostType, Notification, AppUser } from './types';
+import { Post, Region, PostType, Notification, AppUser, Voter } from './types';
 
 function AppContent() {
   const { firebaseUser, dbUser, signIn, signOut, refreshDbUser } = useAuth();
@@ -70,10 +70,15 @@ function AppContent() {
 
   useEffect(() => { refreshDbUser(); }, [refreshDbUser]);
 
-  // Load regions
+  // Load regions — re-fetch when auth changes so is_joined reflects DB state
   useEffect(() => {
-    fetchRegions().then(setRegions).catch(console.error);
-  }, []);
+    fetchRegions()
+      .then(data => {
+        setRegions(data);
+        setJoinedRegions(data.filter(r => r.isJoined).map(r => r.slug));
+      })
+      .catch(console.error);
+  }, [user?.uid]);
 
   // Load region detail when active region changes
   useEffect(() => {
@@ -102,6 +107,21 @@ function AppContent() {
     loadPosts(activeRegion.slug);
   }, [activeRegion?.slug, loadPosts]);
 
+  // Silent re-fetch when auth resolves so userVote is populated from DB
+  const activeRegionSlugRef = useRef<string | undefined>(undefined);
+  activeRegionSlugRef.current = activeRegion?.slug;
+  useEffect(() => {
+    if (!user?.uid || !activeRegionSlugRef.current) return;
+    fetchPosts(activeRegionSlugRef.current)
+      .then(apiPosts => {
+        setPosts(prev => {
+          const others = prev.filter(p => p.regionId !== activeRegionSlugRef.current);
+          return [...apiPosts, ...others];
+        });
+      })
+      .catch(() => {});
+  }, [user?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Apply ?region= query param when on /regions
   useEffect(() => {
     if (!viewPath.startsWith('/regions') || !regions.length) return;
@@ -127,10 +147,17 @@ function AppContent() {
   const handleVote = (postId: string, voteType: 'upvote' | 'downvote') => {
     if (!user) { setSignInOpen(true); return; }
 
+    // Snapshot for rollback and pre-compute next so both optimistic update and API call agree
+    const prevPosts = posts;
+    const target = posts.find(p => p.id === postId);
+    if (!target) return;
+
+    const old = target.userVote ?? null;
+    const next: 'upvote' | 'downvote' | null = old === voteType ? null : voteType;
+
+    // Optimistic update
     setPosts(prev => prev.map(p => {
       if (p.id !== postId) return p;
-      const old  = p.userVote;
-      const next = old === voteType ? null : voteType;
 
       let upDelta = 0, downDelta = 0;
       if (old  === 'upvote')   upDelta   -= 1;
@@ -138,9 +165,9 @@ function AppContent() {
       if (next === 'upvote')   upDelta   += 1;
       if (next === 'downvote') downDelta += 1;
 
-      const me = { id: user.uid, displayName: user.displayName, isVerified: user.isVerified };
-      const dropMe = (list: typeof p.upvoters) => (list || []).filter(v => v.id !== user.uid);
-      const addMe  = (list: typeof p.upvoters) => [...dropMe(list), me];
+      const me: Voter = { id: user.uid, displayName: user.displayName, isVerified: user.isVerified };
+      const dropMe = (list: Voter[]) => (list || []).filter(v => v.id !== user.uid);
+      const addMe  = (list: Voter[]) => [...dropMe(list), me];
 
       let upvoters   = p.upvoters   || [];
       let downvoters = p.downvoters || [];
@@ -157,9 +184,21 @@ function AppContent() {
       };
     }));
 
-    voteOnPost(postId, voteType)
-      .then(() => refreshDbUser())
-      .catch(() => {});
+    // Pass `next` (null when toggling off) — this is the fix for the toggle bug
+    voteOnPost(postId, next)
+      .then(result => {
+        // Confirm counts from server
+        setPosts(prev => prev.map(p => p.id !== postId ? p : {
+          ...p,
+          upvoteCount:   result.upvoteCount,
+          downvoteCount: result.downvoteCount,
+          userVote:      result.userVote,
+        }));
+        refreshDbUser();
+      })
+      .catch(() => {
+        setPosts(prevPosts); // rollback on error
+      });
   };
 
   const handleNewPost = async (data: { title: string; description: string; type: PostType; imageUrls?: string[]; locationText?: string; locationLat?: number; locationLng?: number }) => {
@@ -190,11 +229,12 @@ function AppContent() {
     setJoiningRegion(slug);
     try {
       await joinRegion(slug);
+      setJoinedRegions(prev => prev.includes(slug) ? prev : [...prev, slug]);
     } catch {
-      await new Promise(r => setTimeout(r, 900));
+      showToast({ text: 'Failed to join region. Please try again.', tone: 'ink' });
+    } finally {
+      setJoiningRegion(null);
     }
-    setJoinedRegions(prev => [...prev, slug]);
-    setJoiningRegion(null);
   };
 
   const handleLeaveRegion = async (slug: string) => {

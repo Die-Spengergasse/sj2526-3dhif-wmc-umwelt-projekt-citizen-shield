@@ -1,21 +1,43 @@
 import { Router } from 'express';
 import { pool } from '../db';
-import { verifyToken, AuthRequest } from '../middleware/auth';
+import { verifyToken, optionalToken, AuthRequest } from '../middleware/auth';
 
 export const regionsRouter = Router();
 
-// GET /api/regions
-regionsRouter.get('/', async (_req, res) => {
+// GET /api/regions — public, but includes is_joined when authenticated
+regionsRouter.get('/', optionalToken, async (req: AuthRequest, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, slug, name, intensity, active_hubs, connectivity,
-              description, image_url, map_image_url, emergency_contact,
-              center_lat, center_lng, updated_at
-       FROM regions
-       ORDER BY
-         CASE intensity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'ALERT' THEN 3 ELSE 4 END,
-         name ASC`
-    );
+    let userId: number | null = null;
+    if (req.firebaseUid) {
+      const ur = await pool.query('SELECT id FROM users WHERE google_uid = $1', [req.firebaseUid]);
+      userId = ur.rows[0]?.id ?? null;
+    }
+
+    const result = userId !== null
+      ? await pool.query(
+          `SELECT r.id, r.slug, r.name, r.intensity, r.active_hubs, r.connectivity,
+                  r.description, r.image_url, r.map_image_url, r.emergency_contact,
+                  r.center_lat, r.center_lng, r.updated_at,
+                  EXISTS(
+                    SELECT 1 FROM user_regions ur
+                    WHERE ur.region_id = r.id AND ur.user_id = $1
+                  ) AS is_joined
+           FROM regions r
+           ORDER BY
+             CASE r.intensity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'ALERT' THEN 3 ELSE 4 END,
+             r.name ASC`,
+          [userId]
+        )
+      : await pool.query(
+          `SELECT id, slug, name, intensity, active_hubs, connectivity,
+                  description, image_url, map_image_url, emergency_contact,
+                  center_lat, center_lng, updated_at, false AS is_joined
+           FROM regions
+           ORDER BY
+             CASE intensity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'ALERT' THEN 3 ELSE 4 END,
+             name ASC`
+        );
+
     return res.json(result.rows.map(mapRegion));
   } catch (err) {
     console.error('GET /regions error', err);
@@ -138,5 +160,6 @@ function mapRegion(r: Record<string, unknown>) {
     centerLat: r.center_lat ?? null,
     centerLng: r.center_lng ?? null,
     updatedAt: r.updated_at,
+    isJoined: r.is_joined === true,
   };
 }

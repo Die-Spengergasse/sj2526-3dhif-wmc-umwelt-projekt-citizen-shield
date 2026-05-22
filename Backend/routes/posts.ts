@@ -49,7 +49,15 @@ postsRouter.get('/', optionalToken, async (req: AuthRequest, res) => {
               u.avatar_url   AS author_avatar,
               u.is_verified  AS author_verified,
               COALESCE(json_agg(DISTINCT pt.tag) FILTER (WHERE pt.tag IS NOT NULL), '[]') AS tags,
-              (SELECT vote_type FROM post_votes WHERE post_id = p.id AND voter_id = $4 LIMIT 1) AS user_vote
+              (SELECT vote_type FROM post_votes WHERE post_id = p.id AND voter_id = $4 LIMIT 1) AS user_vote,
+              (SELECT COALESCE(json_agg(v), '[]'::json)
+               FROM (SELECT vu.google_uid AS id, vu.display_name AS "displayName", vu.is_verified AS "isVerified"
+                     FROM post_votes pv2 JOIN users vu ON vu.id = pv2.voter_id
+                     WHERE pv2.post_id = p.id AND pv2.vote_type = 'upvote' LIMIT 8) v) AS upvoters,
+              (SELECT COALESCE(json_agg(v), '[]'::json)
+               FROM (SELECT vu.google_uid AS id, vu.display_name AS "displayName", vu.is_verified AS "isVerified"
+                     FROM post_votes pv2 JOIN users vu ON vu.id = pv2.voter_id
+                     WHERE pv2.post_id = p.id AND pv2.vote_type = 'downvote' LIMIT 8) v) AS downvoters
        FROM posts p
        JOIN regions r ON r.id = p.region_id
        JOIN users  u ON u.id = p.author_id
@@ -89,7 +97,15 @@ postsRouter.get('/:id', optionalToken, async (req: AuthRequest, res) => {
               u.avatar_url   AS author_avatar,
               u.is_verified  AS author_verified,
               COALESCE(json_agg(DISTINCT pt.tag) FILTER (WHERE pt.tag IS NOT NULL), '[]') AS tags,
-              (SELECT vote_type FROM post_votes WHERE post_id = p.id AND voter_id = $2 LIMIT 1) AS user_vote
+              (SELECT vote_type FROM post_votes WHERE post_id = p.id AND voter_id = $2 LIMIT 1) AS user_vote,
+              (SELECT COALESCE(json_agg(v), '[]'::json)
+               FROM (SELECT vu.google_uid AS id, vu.display_name AS "displayName", vu.is_verified AS "isVerified"
+                     FROM post_votes pv2 JOIN users vu ON vu.id = pv2.voter_id
+                     WHERE pv2.post_id = p.id AND pv2.vote_type = 'upvote' LIMIT 8) v) AS upvoters,
+              (SELECT COALESCE(json_agg(v), '[]'::json)
+               FROM (SELECT vu.google_uid AS id, vu.display_name AS "displayName", vu.is_verified AS "isVerified"
+                     FROM post_votes pv2 JOIN users vu ON vu.id = pv2.voter_id
+                     WHERE pv2.post_id = p.id AND pv2.vote_type = 'downvote' LIMIT 8) v) AS downvoters
        FROM posts p
        JOIN regions r ON r.id = p.region_id
        JOIN users  u ON u.id = p.author_id
@@ -292,6 +308,8 @@ function mapPost(r: Record<string, unknown>) {
       isVerified: r.author_verified,
     },
     tags: r.tags,
+    upvoters:   Array.isArray(r.upvoters)   ? r.upvoters   : [],
+    downvoters: Array.isArray(r.downvoters) ? r.downvoters : [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

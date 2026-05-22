@@ -61,6 +61,7 @@ interface ApiRegion {
   emergencyContact: string | null;
   centerLat: number | null;
   centerLng: number | null;
+  isJoined?: boolean;
 }
 
 interface ApiRegionDetail extends ApiRegion {
@@ -81,6 +82,7 @@ function mapApiRegion(r: ApiRegion): Region {
     mapImage: r.mapImageUrl ?? '',
     centerLat: r.centerLat ?? null,
     centerLng: r.centerLng ?? null,
+    isJoined: r.isJoined ?? false,
     localInfo: {
       emergencyContact: r.emergencyContact ?? '',
       safeZones: [],
@@ -137,6 +139,8 @@ interface ApiPost {
     isVerified: boolean;
   };
   tags: string[];
+  upvoters: Array<{ id: string; displayName: string; isVerified: boolean }>;
+  downvoters: Array<{ id: string; displayName: string; isVerified: boolean }>;
   createdAt: string;
 }
 
@@ -169,6 +173,8 @@ function mapApiPost(p: ApiPost): Post {
     upvoteCount: p.upvoteCount,
     downvoteCount: p.downvoteCount,
     userVote: p.userVote ?? null,
+    upvoters:   p.upvoters   ?? [],
+    downvoters: p.downvoters ?? [],
     locationText: p.locationText,
     locationLat: p.location?.lat,
     locationLng: p.location?.lng,

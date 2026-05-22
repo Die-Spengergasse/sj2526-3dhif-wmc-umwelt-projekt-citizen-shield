@@ -5,6 +5,21 @@ import { AlertTriangle, Info, Radio, ThumbsUp, ThumbsDown, CircleCheck, Flag, Ma
 import { S } from '../design-tokens';
 import { Post, Voter } from '../types';
 
+// ── Text formatter ───────────────────────────────────────────
+
+function formatText(text: string, preview = false) {
+  return text.split('\n\n').map((paragraph, i) => (
+    <p key={i} style={{ marginBottom: preview ? 0 : '12px' }}>
+      {paragraph.split('\n').map((line, j, arr) => (
+        <React.Fragment key={j}>
+          {line}
+          {j < arr.length - 1 && <br />}
+        </React.Fragment>
+      ))}
+    </p>
+  ));
+}
+
 // ── Voter Popover ────────────────────────────────────────────
 
 interface VoterPopoverProps {
@@ -298,16 +313,27 @@ export const TimelineItem: React.FC<TimelineItemProps> = ({ post, onVote, onPin,
             {type === 'broadcast' ? `"${title}"` : title}
           </h4>
 
-          <p
-            onClick={() => { if (!noClick) setLocation(`/post/${id}`); }}
-            style={{
-              fontSize: 13.5, color: S.inkSoft, lineHeight: 1.65,
-              marginBottom: (displayImages.length > 0 || tags?.length) ? 12 : 0,
-              cursor: noClick ? 'default' : 'pointer',
-            }}
-          >
-            {description}
-          </p>
+          {noClick ? (
+            <div style={{ fontSize: 13.5, color: S.inkSoft, lineHeight: 1.65, marginBottom: (displayImages.length > 0 || tags?.length) ? 12 : 0 }}>
+              {formatText(description)}
+            </div>
+          ) : (
+            <p
+              onClick={() => setLocation(`/post/${id}`)}
+              style={{
+                fontSize: 13.5, color: S.inkSoft, lineHeight: 1.65,
+                marginBottom: (displayImages.length > 0 || tags?.length) ? 12 : 0,
+                cursor: 'pointer',
+                display: '-webkit-box' as React.CSSProperties['display'],
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: 'vertical' as React.CSSProperties['WebkitBoxOrient'],
+                overflow: 'hidden',
+                whiteSpace: 'pre-line',
+              }}
+            >
+              {description}
+            </p>
+          )}
 
           {displayImages.length > 0 && (
             <ImageGrid images={displayImages} title={title} onImageClick={setLightboxIdx} />

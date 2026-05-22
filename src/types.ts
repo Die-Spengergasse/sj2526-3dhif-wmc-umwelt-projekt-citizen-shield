@@ -48,6 +48,7 @@ export interface Region {
   mapImage: string;
   centerLat?: number | null;
   centerLng?: number | null;
+  isJoined?: boolean;
   localInfo: {
     emergencyContact: string;
     safeZones: string[];
