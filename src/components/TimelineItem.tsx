@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
+import { useLocation } from 'wouter';
 import { AlertTriangle, Info, Radio, ThumbsUp, ThumbsDown, CircleCheck, Flag, MapPin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { S } from '../design-tokens';
 import { Post, Voter } from '../types';
@@ -209,13 +210,16 @@ interface TimelineItemProps {
   isPinnedToCommunity?: boolean;
   currentUser?: { uid: string } | null;
   highlighted?: boolean;
+  noClick?: boolean;
+  noHover?: boolean;
 }
 
-export const TimelineItem: React.FC<TimelineItemProps> = ({ post, onVote, onPin, isPinnedToCommunity, highlighted }) => {
+export const TimelineItem: React.FC<TimelineItemProps> = ({ post, onVote, onPin, isPinnedToCommunity, highlighted, noClick, noHover }) => {
   const { id, time, title, description, type, image, images, tags, upvoteCount, downvoteCount, userVote, author, upvoters = [], downvoters = [], locationText, locationLat, locationLng } = post;
   const displayImages = images?.length ? images : (image ? [image] : []);
   const [openPopover, setOpenPopover] = useState<'upvote' | 'downvote' | null>(null);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
+  const [, setLocation] = useLocation();
 
   const typeConfig = {
     critical:  { color: S.primary,   tone: 'rgba(164,74,58,0.10)',  label: 'Critical',  Icon: AlertTriangle },
@@ -239,10 +243,10 @@ export const TimelineItem: React.FC<TimelineItemProps> = ({ post, onVote, onPin,
         position: 'relative', marginBottom: 14, borderRadius: 14, overflow: 'visible',
         background: S.paper, border: `1px solid ${highlighted ? S.secondary : S.rule}`,
         boxShadow: highlighted ? `0 0 0 2px ${S.secondary}40` : 'none',
-        transition: 'transform 280ms cubic-bezier(.2,.7,.2,1), box-shadow 280ms cubic-bezier(.2,.7,.2,1), border-color 280ms ease',
+        transition: noHover ? 'none' : 'transform 280ms cubic-bezier(.2,.7,.2,1), box-shadow 280ms cubic-bezier(.2,.7,.2,1), border-color 280ms ease',
       }}
-      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; if (!highlighted) { e.currentTarget.style.boxShadow = '0 14px 40px -16px rgba(89,46,28,0.24)'; e.currentTarget.style.borderColor = S.ruleMd; } }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; if (!highlighted) { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = S.rule; } }}>
+      onMouseEnter={e => { if (noHover) return; e.currentTarget.style.transform = 'translateY(-2px)'; if (!highlighted) { e.currentTarget.style.boxShadow = '0 14px 40px -16px rgba(89,46,28,0.24)'; e.currentTarget.style.borderColor = S.ruleMd; } }}
+      onMouseLeave={e => { if (noHover) return; e.currentTarget.style.transform = 'translateY(0)'; if (!highlighted) { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = S.rule; } }}>
         <span style={{
           position: 'absolute', left: 0, top: 14, bottom: 14, width: 3, borderRadius: '0 3px 3px 0',
           background: tc.color, opacity: type === 'critical' ? 1 : 0.7,
@@ -278,17 +282,30 @@ export const TimelineItem: React.FC<TimelineItemProps> = ({ post, onVote, onPin,
             )}
           </div>
 
-          <h4 style={{
-            fontFamily: type === 'broadcast' ? "'Instrument Serif', Georgia, serif" : "'Plus Jakarta Sans', sans-serif",
-            fontSize: type === 'broadcast' ? 22 : 17,
-            fontWeight: type === 'broadcast' ? 400 : 700,
-            fontStyle: type === 'broadcast' ? 'italic' : 'normal',
-            color: S.ink, letterSpacing: '-0.015em', lineHeight: 1.25, marginBottom: 8, marginTop: 0,
-          }}>
+          <h4
+            onClick={() => { if (!noClick) setLocation(`/post/${id}`); }}
+            style={{
+              fontFamily: type === 'broadcast' ? "'Instrument Serif', Georgia, serif" : "'Plus Jakarta Sans', sans-serif",
+              fontSize: type === 'broadcast' ? 22 : 17,
+              fontWeight: type === 'broadcast' ? 400 : 700,
+              fontStyle: type === 'broadcast' ? 'italic' : 'normal',
+              color: S.ink, letterSpacing: '-0.015em', lineHeight: 1.25, marginBottom: 8, marginTop: 0,
+              cursor: noClick ? 'default' : 'pointer',
+            }}
+            onMouseEnter={e => { if (!noClick) e.currentTarget.style.color = S.primary; }}
+            onMouseLeave={e => { e.currentTarget.style.color = S.ink; }}
+          >
             {type === 'broadcast' ? `"${title}"` : title}
           </h4>
 
-          <p style={{ fontSize: 13.5, color: S.inkSoft, lineHeight: 1.65, marginBottom: (displayImages.length > 0 || tags?.length) ? 12 : 0 }}>
+          <p
+            onClick={() => { if (!noClick) setLocation(`/post/${id}`); }}
+            style={{
+              fontSize: 13.5, color: S.inkSoft, lineHeight: 1.65,
+              marginBottom: (displayImages.length > 0 || tags?.length) ? 12 : 0,
+              cursor: noClick ? 'default' : 'pointer',
+            }}
+          >
             {description}
           </p>
 

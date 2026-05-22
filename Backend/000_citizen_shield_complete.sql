@@ -38,8 +38,10 @@
 
 
 -- ============================================================
--- 1. ROLLE ANLEGEN / AKTUALISIEREN (idempotent)
+-- 1. ROLLE & DATENBANK SETUP
 -- ============================================================
+
+-- 1a. ROLLE ANLEGEN / AKTUALISIEREN (idempotent)
 SET citizen_shield.setup_password = :'admin_password';
 
 DO $$
@@ -63,9 +65,7 @@ END
 $$;
 
 
--- ============================================================
--- 2. DATENBANK ANLEGEN (idempotent)
--- ============================================================
+-- 1b. DATENBANK ANLEGEN (idempotent)
 SELECT 'CREATE DATABASE citizen_shield OWNER citizen_shield_user'
  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'citizen_shield')
 \gexec
@@ -73,44 +73,33 @@ SELECT 'CREATE DATABASE citizen_shield OWNER citizen_shield_user'
 ALTER DATABASE citizen_shield OWNER TO citizen_shield_user;
 
 
--- ============================================================
--- 3. DATENBANK-RECHTE
--- ============================================================
+-- 1c. DATENBANK-RECHTE
 GRANT ALL PRIVILEGES ON DATABASE citizen_shield TO citizen_shield_user;
 
 
--- ============================================================
--- 4. VERBINDUNG ZUR ZIEL-DATENBANK WECHSELN
--- ============================================================
+-- 1d. VERBINDUNG ZUR ZIEL-DATENBANK WECHSELN
 \connect citizen_shield
 
 
 -- ============================================================
--- 5. EXTENSIONS (Superuser erforderlich)
+-- 2. EXTENSIONS (Superuser erforderlich)
 -- ============================================================
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "earthdistance" CASCADE;
 
 
 -- ============================================================
--- 6. SCHEMA-RECHTE (public)
+-- 3. SCHEMA-RECHTE & DEFAULT PRIVILEGES
 -- ============================================================
+
 ALTER SCHEMA public OWNER TO citizen_shield_user;
 GRANT  ALL PRIVILEGES ON SCHEMA public TO citizen_shield_user;
 
-
--- ============================================================
--- 7. RECHTE AUF BEREITS VORHANDENE OBJEKTE
--- ============================================================
 GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO citizen_shield_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO citizen_shield_user;
 GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO citizen_shield_user;
 GRANT ALL PRIVILEGES ON ALL ROUTINES  IN SCHEMA public TO citizen_shield_user;
 
-
--- ============================================================
--- 8. DEFAULT-RECHTE FÜR ZUKÜNFTIG ERSTELLTE OBJEKTE
--- ============================================================
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT ALL PRIVILEGES ON TABLES    TO citizen_shield_user;
 
@@ -128,7 +117,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 
 
 -- ============================================================
--- 9. ENUMS
+-- 4. ENUMS
 -- Typsichere Werte für Status-Felder
 -- ============================================================
 
@@ -172,11 +161,19 @@ DO $$ BEGIN
   CREATE TYPE verification_action   AS ENUM ('granted', 'revoked');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+DO $$ BEGIN
+  CREATE TYPE notification_type AS ENUM ('post_approved', 'post_rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 
 -- ============================================================
--- 10. TABELLE: users
--- Zentrale Identitätstabelle – verknüpft mit Google Auth
+-- 5. TABELLEN OHNE FOREIGN KEYS
 -- ============================================================
+
+-- ------------------------------------------------------------
+-- 5a. TABELLE: users
+-- Zentrale Identitätstabelle – verknüpft mit Google Auth
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS users (
   id                      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -201,45 +198,10 @@ COMMENT ON COLUMN users.is_verified            IS 'Blaues Häkchen: einmalig ver
 COMMENT ON COLUMN users.verified_revoke_reason IS 'Pflichtfeld wenn is_verified auf FALSE gesetzt wird.';
 
 
--- ============================================================
--- 11. TABELLE: user_verification_stats
--- Cached Stats für Badge-Berechnung – 1:1 zu users
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS user_verification_stats (
-  user_id                   UUID    PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  total_posts               INT     NOT NULL DEFAULT 0,
-  qualifying_posts          INT     NOT NULL DEFAULT 0,   -- Posts mit ≥90% Upvotes bei ≥50 Stimmen
-  total_upvotes_received    INT     NOT NULL DEFAULT 0,
-  total_downvotes_received  INT     NOT NULL DEFAULT 0,
-  last_calculated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE  user_verification_stats                  IS 'Aggregierte Stats pro User für Badge-Berechnung. Wird asynchron aktualisiert.';
-COMMENT ON COLUMN user_verification_stats.qualifying_posts IS 'Anzahl Posts die die Schwelle erfüllen: ≥90% Upvotes bei ≥50 Gesamtstimmen. Badge wird vergeben ab qualifying_posts >= 10.';
-
-
--- ============================================================
--- 12. TABELLE: verification_log
--- Audit Trail für jeden Badge-Entzug oder -Vergabe durch Admin
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS verification_log (
-  id          UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID                NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  admin_id    UUID                NOT NULL REFERENCES users(id),
-  action      verification_action NOT NULL,
-  reason      TEXT,
-  created_at  TIMESTAMPTZ         NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE verification_log IS 'Vollständige History aller Badge-Vergaben und Entziehungen durch Admins.';
-
-
--- ============================================================
--- 13. TABELLE: regions
+-- ------------------------------------------------------------
+-- 5b. TABELLE: regions
 -- Krisenregionen – dynamische Status-Felder werden vom Backend aktualisiert
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS regions (
   id                UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -264,9 +226,48 @@ COMMENT ON COLUMN regions.center_lat   IS 'Geographisches Zentrum (typischerweis
 
 
 -- ============================================================
--- 14. TABELLE: region_safe_zones
--- Verifizierte sichere Treffpunkte pro Region
+-- 6. TABELLEN MIT FOREIGN KEYS (Dependency-Reihenfolge)
 -- ============================================================
+
+-- ------------------------------------------------------------
+-- 6a. TABELLE: user_verification_stats
+-- Cached Stats für Badge-Berechnung – 1:1 zu users
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS user_verification_stats (
+  user_id                   UUID    PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  total_posts               INT     NOT NULL DEFAULT 0,
+  qualifying_posts          INT     NOT NULL DEFAULT 0,   -- Posts mit ≥90% Upvotes bei ≥50 Stimmen
+  total_upvotes_received    INT     NOT NULL DEFAULT 0,
+  total_downvotes_received  INT     NOT NULL DEFAULT 0,
+  last_calculated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE  user_verification_stats                  IS 'Aggregierte Stats pro User für Badge-Berechnung. Wird asynchron aktualisiert.';
+COMMENT ON COLUMN user_verification_stats.qualifying_posts IS 'Anzahl Posts die die Schwelle erfüllen: ≥90% Upvotes bei ≥50 Gesamtstimmen. Badge wird vergeben ab qualifying_posts >= 10.';
+
+
+-- ------------------------------------------------------------
+-- 6b. TABELLE: verification_log
+-- Audit Trail für jeden Badge-Entzug oder -Vergabe durch Admin
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS verification_log (
+  id          UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID                NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  admin_id    UUID                NOT NULL REFERENCES users(id),
+  action      verification_action NOT NULL,
+  reason      TEXT,
+  created_at  TIMESTAMPTZ         NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE verification_log IS 'Vollständige History aller Badge-Vergaben und Entziehungen durch Admins.';
+
+
+-- ------------------------------------------------------------
+-- 6c. TABELLE: region_safe_zones
+-- Verifizierte sichere Treffpunkte pro Region
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS region_safe_zones (
   id          UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -279,10 +280,10 @@ CREATE TABLE IF NOT EXISTS region_safe_zones (
 COMMENT ON TABLE region_safe_zones IS 'Verifizierte Safe Zones pro Region. Erweiterbar mit GPS-Koordinaten für Kartenansicht.';
 
 
--- ============================================================
--- 15. TABELLE: region_resources
+-- ------------------------------------------------------------
+-- 6d. TABELLE: region_resources
 -- Lokale Ressourcen (Medizin, Rechtsberatung, etc.)
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS region_resources (
   id          UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -296,10 +297,10 @@ CREATE TABLE IF NOT EXISTS region_resources (
 COMMENT ON TABLE region_resources IS 'Lokale Ressourcen pro Region. category ermöglicht Filterung im Safety Hub.';
 
 
--- ============================================================
--- 16. TABELLE: user_regions
+-- ------------------------------------------------------------
+-- 6e. TABELLE: user_regions
 -- M:N Verbindung User ↔ Region mit Rolle
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS user_regions (
   id          UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -315,10 +316,10 @@ COMMENT ON TABLE  user_regions      IS 'Zugehörigkeit eines Users zu einer Regi
 COMMENT ON COLUMN user_regions.role IS 'member = normaler User, moderator = kann Posts reviewen, hub_coordinator = kann Region-Status aktualisieren.';
 
 
--- ============================================================
--- 17. TABELLE: posts
+-- ------------------------------------------------------------
+-- 6f. TABELLE: posts
 -- Community-Reports – werden sofort gepostet (außer bei Distanz-Anomalie)
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS posts (
   id                    UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -351,6 +352,7 @@ CREATE TABLE IF NOT EXISTS posts (
   location_public_lng   DOUBLE PRECISION,
   location_label        TEXT,
   location_status       location_status   NOT NULL DEFAULT 'none',
+  location_text         VARCHAR(255),
 
   created_at            TIMESTAMPTZ       NOT NULL DEFAULT now(),
   updated_at            TIMESTAMPTZ       NOT NULL DEFAULT now()
@@ -363,12 +365,13 @@ COMMENT ON COLUMN posts.upvote_count        IS 'Denormalisierter Zähler – wir
 COMMENT ON COLUMN posts.location_lat        IS 'Exakte Koordinaten – NIEMALS in API-Responses an Client übergeben.';
 COMMENT ON COLUMN posts.location_public_lat IS 'Auf 2 Dezimalstellen gerundet (~1.1km Unschärfe) – safe für öffentliche Kartenanzeige.';
 COMMENT ON COLUMN posts.location_distance_m IS 'Berechnete Distanz beim Upload. >5000m → pending_review.';
+COMMENT ON COLUMN posts.location_text       IS 'Manuelle Standort-Beschreibung z.B. "Kathmandu, Thamel District". Alternative zu GPS-Koordinaten.';
 
 
--- ============================================================
--- 18. TABELLE: post_tags
+-- ------------------------------------------------------------
+-- 6g. TABELLE: post_tags
 -- Tags als eigene Tabelle für Querybarkeit
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS post_tags (
   id        UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -381,10 +384,10 @@ CREATE TABLE IF NOT EXISTS post_tags (
 COMMENT ON TABLE post_tags IS 'Tags als separate Zeilen – ermöglicht Filterung wie "alle Posts mit Tag MeshNet in Myanmar".';
 
 
--- ============================================================
--- 19. TABELLE: post_votes
+-- ------------------------------------------------------------
+-- 6h. TABELLE: post_votes
 -- Öffentliche Votes – jeder sieht wer wie gevoted hat
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS post_votes (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -400,10 +403,10 @@ COMMENT ON TABLE  post_votes           IS 'Vollständig öffentliche Votes. UNIQ
 COMMENT ON COLUMN post_votes.vote_type IS 'upvote oder downvote. Ändern via UPDATE (nicht DELETE + INSERT) um created_at zu erhalten.';
 
 
--- ============================================================
--- 20. TABELLE: moderation_queue
+-- ------------------------------------------------------------
+-- 6i. TABELLE: moderation_queue
 -- Posts die >5km vom angegebenen Ort entfernt erstellt wurden
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS moderation_queue (
   id              UUID                  PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -422,10 +425,10 @@ COMMENT ON COLUMN moderation_queue.moderator_id IS 'NULL = noch nicht zugewiesen
 COMMENT ON COLUMN moderation_queue.distance_m   IS 'Distanz in Metern zwischen User-GPS und angegebenem Ort beim Upload.';
 
 
--- ============================================================
--- 21. TABELLE: pinned_posts
+-- ------------------------------------------------------------
+-- 6j. TABELLE: pinned_posts
 -- Pro-User gepinnte Posts pro Region
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS pinned_posts (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -440,10 +443,10 @@ CREATE TABLE IF NOT EXISTS pinned_posts (
 COMMENT ON TABLE pinned_posts IS 'Persistente, user-spezifische Pins auf Posts. region_slug ermöglicht schnelles Filtern pro Region.';
 
 
--- ============================================================
--- 22. TABELLE: post_comments
+-- ------------------------------------------------------------
+-- 6k. TABELLE: post_comments
 -- Kommentare auf Posts
--- ============================================================
+-- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS post_comments (
   id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -456,33 +459,23 @@ CREATE TABLE IF NOT EXISTS post_comments (
 COMMENT ON TABLE post_comments IS 'Kommentare auf Posts. Ein Post kann beliebig viele Kommentare haben.';
 
 
--- ============================================================
--- 23. MIGRATIONS-HELFER FÜR BESTEHENDE DATENBANKEN (idempotent)
--- Stellt sicher, dass ältere DBs (vor combined 000+001) auf
--- den aktuellen Schema-Stand gebracht werden.
--- ============================================================
+-- ------------------------------------------------------------
+-- 6l. TABELLE: notifications
+-- ------------------------------------------------------------
 
--- posts.images Spalte ergänzen falls Tabelle aus Vor-Version stammt
-ALTER TABLE posts ADD COLUMN IF NOT EXISTS images TEXT[] DEFAULT '{}';
-
--- Bestehende Einzelbilder in das images-Array migrieren
-UPDATE posts
-SET images = ARRAY[image_url]
-WHERE image_url IS NOT NULL
-  AND (images IS NULL OR images = '{}');
-
--- Named UNIQUE Constraints sicherstellen (für ON CONFLICT ON CONSTRAINT im Seed)
-DO $$ BEGIN
-  ALTER TABLE region_safe_zones ADD CONSTRAINT uq_safe_zone_region_name UNIQUE (region_id, name);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-  ALTER TABLE region_resources ADD CONSTRAINT uq_resource_region_title UNIQUE (region_id, title);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+CREATE TABLE IF NOT EXISTS notifications (
+  id         UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID              NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  post_id    UUID              REFERENCES posts(id) ON DELETE SET NULL,
+  type       notification_type NOT NULL,
+  reason     TEXT,
+  read       BOOLEAN           NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ       NOT NULL DEFAULT now()
+);
 
 
 -- ============================================================
--- 24. INDEXES
+-- 7. INDEXES
 -- ============================================================
 
 CREATE INDEX IF NOT EXISTS idx_posts_region_created ON posts (region_id, created_at DESC);
@@ -495,12 +488,17 @@ CREATE INDEX IF NOT EXISTS idx_users_google_uid     ON users (google_uid);
 CREATE INDEX IF NOT EXISTS idx_regions_slug         ON regions (slug);
 CREATE INDEX IF NOT EXISTS idx_pinned_posts_user    ON pinned_posts (user_id);
 CREATE INDEX IF NOT EXISTS idx_post_comments_post   ON post_comments (post_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id
+  ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread
+  ON notifications(user_id, read) WHERE read = FALSE;
 
 
 -- ============================================================
--- 25. TRIGGER: updated_at automatisch aktualisieren
+-- 8. TRIGGER-FUNKTIONEN & TRIGGERS
 -- ============================================================
 
+-- 8a. TRIGGER: updated_at automatisch aktualisieren
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -515,10 +513,7 @@ CREATE TRIGGER trg_posts_updated_at
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 
--- ============================================================
--- 26. TRIGGER: upvote_count / downvote_count automatisch aktualisieren
--- ============================================================
-
+-- 8b. TRIGGER: upvote_count / downvote_count automatisch aktualisieren
 CREATE OR REPLACE FUNCTION sync_vote_counts()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -538,10 +533,7 @@ CREATE TRIGGER trg_sync_vote_counts
   FOR EACH ROW EXECUTE FUNCTION sync_vote_counts();
 
 
--- ============================================================
--- 27. TRIGGER: user_verification_stats automatisch anlegen
--- ============================================================
-
+-- 8c. TRIGGER: user_verification_stats automatisch anlegen
 CREATE OR REPLACE FUNCTION create_verification_stats()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -558,9 +550,24 @@ CREATE TRIGGER trg_create_verification_stats
 
 
 -- ============================================================
--- 28. SEED DATA: Initiale Regionen
+-- 9. ALTER TABLE ... ADD CONSTRAINT
+-- Named UNIQUE Constraints sicherstellen (für ON CONFLICT ON CONSTRAINT im Seed)
 -- ============================================================
 
+DO $$ BEGIN
+  ALTER TABLE region_safe_zones ADD CONSTRAINT uq_safe_zone_region_name UNIQUE (region_id, name);
+EXCEPTION WHEN duplicate_table THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE region_resources ADD CONSTRAINT uq_resource_region_title UNIQUE (region_id, title);
+EXCEPTION WHEN duplicate_table THEN NULL; END $$;
+
+
+-- ============================================================
+-- 10. SEED-DATEN
+-- ============================================================
+
+-- 10a. Initiale Regionen
 INSERT INTO regions (slug, name, intensity, active_hubs, connectivity, description, emergency_contact, center_lat, center_lng) VALUES
   ('nepal',   'NEPAL',   'CRITICAL', 14, 62, 'Community-led support networks are active across the Kathmandu Valley.',       '+977 1-4200105',           27.7172, 85.3240),
   ('myanmar', 'MYANMAR', 'HIGH',     28, 45, 'Civil Disobedience Movement nodes are coordinating essential services.',        'Signal: @MyanmarAid_Bot',  16.8409, 96.1735),
@@ -570,9 +577,7 @@ INSERT INTO regions (slug, name, intensity, active_hubs, connectivity, descripti
 ON CONFLICT (slug) DO NOTHING;
 
 
--- ============================================================
--- 29. SEED DATA: Safe Zones & Resources für alle 5 Regionen
--- ============================================================
+-- 10b. Safe Zones & Resources für alle 5 Regionen
 
 -- NEPAL ─────────────────────────────────────────────────────
 
@@ -755,14 +760,7 @@ ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
 
 
 -- ============================================================
--- Idempotente Schema-Erweiterungen (nachträglich hinzugefügt)
--- ============================================================
-ALTER TABLE posts ADD COLUMN IF NOT EXISTS location_text VARCHAR(255);
-COMMENT ON COLUMN posts.location_text IS 'Manuelle Standort-Beschreibung z.B. "Kathmandu, Thamel District". Alternative zu GPS-Koordinaten.';
-
-
--- ============================================================
--- 30. VERIFIKATION
+-- 11. VERIFIKATION
 -- ============================================================
 \echo ''
 \echo '=== Setup abgeschlossen ==='

@@ -1,31 +1,30 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Router, Route, useLocation } from 'wouter';
 import { TopNav } from './components/TopNav';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
-import { Chat } from './components/Chat';
 import { PostForm } from './components/PostForm';
 import { SignInModal } from './components/SignInModal';
 import { HubView } from './views/HubView';
 import { FeedView } from './views/FeedView';
 import { SafetyView } from './views/SafetyView';
 import { RegionsView } from './views/RegionsView';
-import { CommunityView } from './views/CommunityView';
-import { GlobeView } from './views/GlobeView';
 import { ModerationView } from './views/ModerationView';
+import { PostDetailView } from './views/PostDetailView';
 import { Toaster, showToast, useNow, formatRelative } from './motion';
 import { Wordmark } from './components/Wordmark';
 import {
   fetchRegions, fetchRegionDetail, fetchPosts, createPost, voteOnPost,
-  joinRegion, leaveRegion, fetchPinnedPosts, pinPost, unpinPost,
+  joinRegion, leaveRegion,
+  fetchNotifications, markNotificationRead, markAllNotificationsRead,
 } from './api';
 import { useAuth } from './context/AuthContext';
 import { S } from './design-tokens';
-import { Post, Region, PostType, Notification, Comment, AppUser } from './types';
+import { Post, Region, PostType, Notification, AppUser } from './types';
 
-type View = 'hub' | 'regions' | 'globe' | 'security' | 'safety' | 'community' | 'moderation';
-
-export default function App() {
+function AppContent() {
   const { firebaseUser, dbUser, signIn, signOut, refreshDbUser } = useAuth();
+  const [location, setLocation] = useLocation();
 
   const user: AppUser | null = firebaseUser
     ? {
@@ -41,19 +40,25 @@ export default function App() {
       }
     : null;
 
-  const [view,            setView]           = useState<View>('hub');
   const [regions,         setRegions]        = useState<Region[]>([]);
   const [posts,           setPosts]          = useState<Post[]>([]);
   const [loadingPosts,    setLoadingPosts]   = useState(false);
   const [activeRegionIdx, setActiveRegionIdx]= useState(0);
-  const [chatRegion,      setChatRegion]     = useState<string | null>(null);
   const [postFormOpen,    setPostFormOpen]   = useState(false);
   const [signInOpen,      setSignInOpen]     = useState(false);
   const [joiningRegion,   setJoiningRegion]  = useState<string | null>(null);
   const [joinedRegions,   setJoinedRegions]  = useState<string[]>([]);
-  const [pinnedPosts,     setPinnedPosts]    = useState<Record<string, string[]>>({});
-  const [comments,        setComments]       = useState<Record<string, Comment[]>>({});
   const [notifications,   setNotifications]  = useState<Notification[]>([]);
+
+  // Track the last non-post-detail path for background rendering
+  const lastBgPathRef = useRef('/');
+  useEffect(() => {
+    if (!location.startsWith('/post/')) {
+      lastBgPathRef.current = location;
+    }
+  }, [location]);
+
+  const viewPath = location.startsWith('/post/') ? lastBgPathRef.current : location;
 
   const now = useNow(30000);
   const displayNotifications = notifications.map(n => ({
@@ -63,10 +68,9 @@ export default function App() {
 
   const activeRegion = regions[activeRegionIdx] || regions[0];
 
-  // Refresh user stats on mount so numbers are always live
   useEffect(() => { refreshDbUser(); }, [refreshDbUser]);
 
-  // Load regions on mount
+  // Load regions
   useEffect(() => {
     fetchRegions().then(setRegions).catch(console.error);
   }, []);
@@ -98,17 +102,27 @@ export default function App() {
     loadPosts(activeRegion.slug);
   }, [activeRegion?.slug, loadPosts]);
 
-  // Pins are community-wide — load for everyone (incl. signed-out users) and refresh on auth change.
+  // Apply ?region= query param when on /regions
   useEffect(() => {
-    fetchPinnedPosts()
-      .then(grouped => setPinnedPosts(grouped))
-      .catch(() => {});
-  }, [user?.uid]);
+    if (!viewPath.startsWith('/regions') || !regions.length) return;
+    const search = viewPath.split('?')[1] || '';
+    const slug = new URLSearchParams(search).get('region');
+    if (slug) {
+      const idx = regions.findIndex(r => r.slug === slug);
+      if (idx !== -1) setActiveRegionIdx(idx);
+    }
+  }, [viewPath, regions]);
 
   // Scroll to top on view change
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [view]);
+  }, [viewPath]);
+
+  // Fetch notifications when logged in
+  useEffect(() => {
+    if (!user) { setNotifications([]); return; }
+    fetchNotifications().then(setNotifications).catch(() => {});
+  }, [user?.uid]);
 
   const handleVote = (postId: string, voteType: 'upvote' | 'downvote') => {
     if (!user) { setSignInOpen(true); return; }
@@ -164,53 +178,10 @@ export default function App() {
       console.log('[handleNewPost] createPost response:', result);
       loadPosts(activeRegion.slug);
       refreshDbUser();
-      setNotifications(prev => [
-        { id: 'n-new-' + Date.now(), text: `Your report "${data.title}" submitted for verification`, _at: Date.now(), read: false, time: 'Just now' },
-        ...prev,
-      ]);
       showToast({ text: 'Report submitted for verification.', tone: 'success' });
     } catch (err) {
       console.error('[handleNewPost] createPost failed:', err);
       showToast({ text: err instanceof Error ? err.message : 'Failed to submit report. Please try again.', tone: 'ink' });
-    }
-  };
-
-  const handlePinPost = async (post: Post) => {
-    if (!user) { setSignInOpen(true); return; }
-    const slug = post.regionId;
-    const cur = pinnedPosts[slug] || [];
-    const isPinned = cur.includes(post.id);
-
-    // Optimistic update
-    setPinnedPosts(prev => {
-      const c = prev[slug] || [];
-      const next = c.includes(post.id) ? c.filter(id => id !== post.id) : [post.id, ...c];
-      return { ...prev, [slug]: next };
-    });
-
-    try {
-      if (isPinned) {
-        await unpinPost(post.id);
-      } else {
-        await pinPost(post.id);
-      }
-    } catch {
-      // Revert on failure
-      setPinnedPosts(prev => {
-        const c = prev[slug] || [];
-        const reverted = isPinned ? [post.id, ...c] : c.filter(id => id !== post.id);
-        return { ...prev, [slug]: reverted };
-      });
-    }
-
-    showToast(isPinned
-      ? { text: `Unpinned from ${slug?.toUpperCase()} Community.`, tone: 'ink' }
-      : { text: `Pinned to ${slug?.toUpperCase()} Community. Tap Community to discuss.`, tone: 'primary' });
-    if (!isPinned) {
-      setNotifications(prev => [
-        { id: 'n-pin-' + Date.now(), text: `"${post.title}" was pinned for community discussion`, _at: Date.now(), read: false, time: 'Just now' },
-        ...prev,
-      ]);
     }
   };
 
@@ -240,23 +211,97 @@ export default function App() {
     setPostFormOpen(true);
   };
 
-  const handleAddComment = (postId: string, comment: Comment) => {
-    // CommunityView has already POSTed the comment; this only syncs local state
-    // so the parent's comment-count UI updates. Posting again here caused duplicates.
-    setComments(prev => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
+  const handleMarkNotificationRead = (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    markNotificationRead(id).catch(() => {});
   };
 
-  const handleMarkNotificationRead = (id: string) =>
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  const handleMarkAllNotificationsRead = () =>
+  const handleMarkAllNotificationsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    markAllNotificationsRead().catch(() => {});
+  };
+
+  const handleRegionSelect = (idx: number) => {
+    setActiveRegionIdx(idx);
+    const slug = regions[idx]?.slug;
+    setLocation('/regions' + (slug ? `?region=${slug}` : ''));
+  };
+
+  const navigate = (view: string) => {
+    const map: Record<string, string> = {
+      hub: '/', regions: '/regions', feed: '/feed',
+      security: '/feed', safety: '/safety', moderation: '/moderation',
+    };
+    setLocation(map[view] ?? `/${view}`);
+  };
 
   const regionPosts = posts.filter(p => p.regionId === activeRegion?.slug);
 
+  const renderView = () => {
+    const base = viewPath.split('?')[0];
+    if (base === '/' || base === '') {
+      return (
+        <HubView
+          regions={regions}
+          onViewChange={navigate}
+          onRegionSelect={handleRegionSelect}
+        />
+      );
+    }
+    if (base === '/regions') {
+      return regions.length > 0 ? (
+        <RegionsView
+          regions={regions} posts={posts} user={user}
+          activeRegionIdx={activeRegionIdx}
+          onRegionIdxChange={setActiveRegionIdx}
+          onSignIn={() => setSignInOpen(true)}
+          onOpenPostForm={handleOpenPostForm}
+          onVote={handleVote}
+          onJoinRegion={handleJoinRegion}
+          onLeaveRegion={handleLeaveRegion}
+          joiningRegion={joiningRegion}
+          joinedRegions={joinedRegions}
+          onViewChange={navigate}
+        />
+      ) : null;
+    }
+    if (base === '/feed') {
+      return activeRegion ? (
+        <FeedView
+          posts={regionPosts} regions={regions} activeRegion={activeRegion}
+          onPostClick={() => handleOpenPostForm(user, () => setSignInOpen(true))}
+          onRegionSelect={setActiveRegionIdx}
+          onVote={handleVote}
+          loadingPosts={loadingPosts}
+        />
+      ) : null;
+    }
+    if (base === '/safety') {
+      return regions.length > 0 ? (
+        <SafetyView
+          regions={regions}
+          activeRegionIdx={activeRegionIdx}
+          onRegionChange={setActiveRegionIdx}
+        />
+      ) : null;
+    }
+    if (base === '/moderation') {
+      return (
+        <ModerationView user={user} onSignIn={() => setSignInOpen(true)} />
+      );
+    }
+    return (
+      <HubView
+        regions={regions}
+        onViewChange={navigate}
+        onRegionSelect={handleRegionSelect}
+      />
+    );
+  };
+
   return (
-    <div style={{ minHeight: '100vh', color: S.ink, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', color: S.ink, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
       <TopNav
-        currentView={view} onViewChange={v => setView(v as View)}
         user={user} onSignIn={() => setSignInOpen(true)} onSignOut={signOut}
         notifications={displayNotifications}
         onMarkRead={handleMarkNotificationRead}
@@ -273,78 +318,26 @@ export default function App() {
           onSubmit={handleNewPost}
         />
       )}
-      {chatRegion && (
-        <Chat region={chatRegion} currentUser={user} onClose={() => setChatRegion(null)} />
-      )}
 
-      <main style={{ paddingTop: 80, paddingBottom: 120, position: 'relative', minHeight: '100vh' }}>
-        <div style={{ paddingBlock: '40px 80px' }} className="cs-main-inner">
-          <div key={view}>
-            {view === 'hub' && (
-              <HubView
-                regions={regions}
-                onViewChange={v => setView(v as View)}
-                onRegionSelect={idx => { setActiveRegionIdx(idx); setView('regions'); }}
-              />
-            )}
-            {view === 'globe' && (
-              <GlobeView
-                regions={regions}
-                onRegionSelect={i => setActiveRegionIdx(i)}
-                onViewChange={v => setView(v as View)}
-              />
-            )}
-            {view === 'regions' && regions.length > 0 && (
-              <RegionsView
-                regions={regions} posts={posts} user={user}
-                activeRegionIdx={activeRegionIdx}
-                onRegionIdxChange={setActiveRegionIdx}
-                onSignIn={() => setSignInOpen(true)}
-                onOpenPostForm={handleOpenPostForm}
-                onOpenChat={id => setChatRegion(id)}
-                onVote={handleVote}
-                onPin={handlePinPost} pinnedPosts={pinnedPosts}
-                onJoinRegion={handleJoinRegion}
-                onLeaveRegion={handleLeaveRegion}
-                joiningRegion={joiningRegion}
-                joinedRegions={joinedRegions}
-                onViewChange={v => setView(v as View)}
-              />
-            )}
-            {view === 'security' && activeRegion && (
-              <FeedView
-                posts={regionPosts} regions={regions} activeRegion={activeRegion}
-                onPostClick={() => handleOpenPostForm(user, () => setSignInOpen(true))}
-                onRegionSelect={setActiveRegionIdx}
-                onVote={handleVote}
-                onPin={handlePinPost} pinnedPosts={pinnedPosts}
-                loadingPosts={loadingPosts}
-              />
-            )}
-            {view === 'safety' && regions.length > 0 && (
-              <SafetyView
-                regions={regions}
-                activeRegionIdx={activeRegionIdx}
-                onRegionChange={setActiveRegionIdx}
-              />
-            )}
-            {view === 'community' && (
-              <CommunityView
-                regions={regions} posts={posts}
-                pinnedPosts={pinnedPosts} comments={comments}
-                user={user} onSignIn={() => setSignInOpen(true)}
-                onAddComment={handleAddComment} onVote={handleVote}
-                onPin={handlePinPost}
-              />
-            )}
-            {view === 'moderation' && (
-              <ModerationView user={user} onSignIn={() => setSignInOpen(true)} />
-            )}
-          </div>
+      {/* Post detail overlay */}
+      <Route path="/post/:id">
+        {(params) => (
+          <PostDetailView
+            postId={params.id!}
+            cachedPost={posts.find(p => p.id === params.id) ?? null}
+            user={user}
+            onSignIn={() => setSignInOpen(true)}
+            onVote={handleVote}
+          />
+        )}
+      </Route>
 
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: 72 }}>
+        <div style={{ flex: 1, paddingInline: 'clamp(16px, 4vw, 48px)', paddingTop: 32, paddingBottom: 80 }} className="cs-main-inner">
+          {renderView()}
         </div>
 
-        <footer style={{ marginTop: 96, paddingTop: 32, paddingInline: 'clamp(16px, 4vw, 48px)', borderTop: `1px solid ${S.rule}` }}>
+        <footer style={{ paddingTop: 32, paddingInline: 'clamp(16px, 4vw, 48px)', borderTop: `1px solid ${S.rule}` }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24 }}>
             <div style={{ maxWidth: 360 }}>
               <Wordmark size="lg" />
@@ -373,7 +366,15 @@ export default function App() {
         </footer>
       </main>
 
-      <BottomNav currentView={view} onViewChange={v => setView(v as View)} />
+      <BottomNav />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
   );
 }

@@ -1,19 +1,16 @@
 import React from 'react';
-import { Globe, Map as MapIcon, Radio, ShieldCheck, Users } from 'lucide-react';
+import { useLocation } from 'wouter';
+import { Globe, Map as MapIcon, Radio, ShieldCheck } from 'lucide-react';
 import { S } from '../design-tokens';
 
-interface BottomNavProps {
-  currentView: string;
-  onViewChange: (view: string) => void;
-}
+export const BottomNav: React.FC = () => {
+  const [location, setLocation] = useLocation();
 
-export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onViewChange }) => {
   const items = [
-    { id: 'hub',       label: 'Hub',     icon: <Globe size={20}/> },
-    { id: 'regions',   label: 'Regions', icon: <MapIcon size={20}/> },
-    { id: 'security',  label: 'Feed',    icon: <Radio size={20}/> },
-    { id: 'safety',    label: 'Safety',  icon: <ShieldCheck size={20}/> },
-    { id: 'community', label: 'Comm.',   icon: <Users size={20}/> },
+    { path: '/',        label: 'Hub',     icon: <Globe size={20}/> },
+    { path: '/regions', label: 'Regions', icon: <MapIcon size={20}/> },
+    { path: '/feed',    label: 'Feed',    icon: <Radio size={20}/> },
+    { path: '/safety',  label: 'Safety',  icon: <ShieldCheck size={20}/> },
   ];
 
   return (
@@ -24,9 +21,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onViewChange 
       borderTop: `1px solid ${S.rule}`,
     }}>
       {items.map(item => {
-        const active = currentView === item.id;
+        const active = item.path === '/' ? location === '/' : location.startsWith(item.path);
         return (
-          <button key={item.id} onClick={() => onViewChange(item.id)}
+          <button key={item.path} onClick={() => setLocation(item.path)}
             style={{
               flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               gap: 3, padding: '8px 4px', border: 'none', background: 'transparent', cursor: 'pointer',

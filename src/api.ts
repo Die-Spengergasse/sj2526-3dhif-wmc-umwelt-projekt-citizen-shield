@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import { Region, Post, PostType, Comment } from './types';
+import { Region, Post, PostType, Comment, Notification } from './types';
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const headers: Record<string, string> = {
@@ -182,6 +182,11 @@ export async function fetchPosts(regionSlug: string): Promise<Post[]> {
   return data.map(mapApiPost);
 }
 
+export async function fetchPost(postId: string): Promise<Post> {
+  const data: ApiPost = await apiFetch(`/api/posts/${postId}`);
+  return mapApiPost(data);
+}
+
 export async function createPost(params: {
   regionSlug: string;
   title: string;
@@ -208,20 +213,6 @@ export async function voteOnPost(postId: string, voteType: 'upvote' | 'downvote'
     method: 'POST',
     body: JSON.stringify({ voteType }),
   });
-}
-
-// ── Pin helpers ──
-
-export async function fetchPinnedPosts(): Promise<Record<string, string[]>> {
-  return apiFetch('/api/posts/pinned');
-}
-
-export async function pinPost(postId: string): Promise<void> {
-  await apiFetch(`/api/posts/${postId}/pin`, { method: 'POST' });
-}
-
-export async function unpinPost(postId: string): Promise<void> {
-  await apiFetch(`/api/posts/${postId}/pin`, { method: 'DELETE' });
 }
 
 // ── Comment helpers ──
@@ -269,9 +260,42 @@ export async function fetchModerationQueue(): Promise<ApiModerationItem[]> {
   return apiFetch('/api/moderation');
 }
 
-export async function reviewPost(queueId: string, decision: 'approved' | 'rejected', note?: string): Promise<void> {
+export async function reviewPost(queueId: string, decision: 'approved' | 'rejected', reason?: string): Promise<void> {
   await apiFetch(`/api/moderation/${queueId}/review`, {
     method: 'POST',
-    body: JSON.stringify({ decision, note }),
+    body: JSON.stringify({ decision, reason }),
   });
+}
+
+// ── Notification helpers ──
+
+interface ApiNotification {
+  id: string;
+  postId: string | null;
+  postTitle: string | null;
+  type: 'post_approved' | 'post_rejected';
+  reason: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export async function fetchNotifications(): Promise<Notification[]> {
+  const data: ApiNotification[] = await apiFetch('/api/notifications');
+  return data.map(n => ({
+    id: n.id,
+    text: n.type === 'post_approved'
+      ? `Your report${n.postTitle ? ` "${n.postTitle}"` : ''} was approved${n.reason ? `: ${n.reason}` : ''}`
+      : `Your report${n.postTitle ? ` "${n.postTitle}"` : ''} was rejected${n.reason ? `: ${n.reason}` : ''}`,
+    time: formatTime(n.createdAt),
+    read: n.read,
+    _at: new Date(n.createdAt).getTime(),
+  }));
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await apiFetch('/api/notifications/read-all', { method: 'POST' });
 }

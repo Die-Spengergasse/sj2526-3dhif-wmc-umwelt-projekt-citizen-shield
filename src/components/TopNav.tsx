@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'wouter';
 import {
-  Globe, Map as MapIcon, Zap, Radio, ShieldCheck, Users, ShieldAlert,
+  Globe, Map as MapIcon, Radio, ShieldCheck, ShieldAlert,
   Bell, LogIn, LogOut, ChevronDown, CircleCheck,
 } from 'lucide-react';
 import { S } from '../design-tokens';
@@ -8,8 +9,6 @@ import { Wordmark } from './Wordmark';
 import { Notification, AppUser } from '../types';
 
 interface TopNavProps {
-  currentView: string;
-  onViewChange: (view: string) => void;
   user: AppUser | null;
   onSignIn: () => void;
   onSignOut: () => void;
@@ -19,8 +18,9 @@ interface TopNavProps {
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
-  currentView, onViewChange, user, onSignIn, onSignOut, notifications, onMarkRead, onMarkAllRead,
+  user, onSignIn, onSignOut, notifications, onMarkRead, onMarkAllRead,
 }) => {
+  const [location, setLocation] = useLocation();
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const menuRef  = useRef<HTMLDivElement>(null);
@@ -37,14 +37,17 @@ export const TopNav: React.FC<TopNavProps> = ({
   }, []);
 
   const navItems = [
-    { id: 'hub',        label: 'Hub',       icon: <Globe size={14}/> },
-    { id: 'regions',    label: 'Regions',   icon: <MapIcon size={14}/> },
-    { id: 'globe',      label: 'Globe',     icon: <Zap size={14}/> },
-    { id: 'security',   label: 'Feed',      icon: <Radio size={14}/> },
-    { id: 'safety',     label: 'Safety',    icon: <ShieldCheck size={14}/> },
-    { id: 'community',  label: 'Community', icon: <Users size={14}/> },
-    ...(user ? [{ id: 'moderation', label: 'Review', icon: <ShieldAlert size={14}/> }] : []),
+    { path: '/',            label: 'Hub',     icon: <Globe size={14}/> },
+    { path: '/regions',     label: 'Regions', icon: <MapIcon size={14}/> },
+    { path: '/feed',        label: 'Feed',    icon: <Radio size={14}/> },
+    { path: '/safety',      label: 'Safety',  icon: <ShieldCheck size={14}/> },
+    ...(user ? [{ path: '/moderation', label: 'Review', icon: <ShieldAlert size={14}/> }] : []),
   ];
+
+  const isActive = (path: string) => {
+    if (path === '/') return location === '/';
+    return location.startsWith(path);
+  };
 
   return (
     <nav style={{
@@ -60,7 +63,7 @@ export const TopNav: React.FC<TopNavProps> = ({
         padding: '6px 14px 6px 8px', borderRadius: 14,
         background: 'rgba(251,247,236,0.55)', border: `1px solid ${S.ruleSoft}`,
       }}>
-        <Wordmark size="lg" onClick={() => onViewChange('hub')} />
+        <Wordmark size="lg" onClick={() => setLocation('/')} />
       </div>
 
       <div className="cs-desktop-only cs-topnav-items" style={{
@@ -69,9 +72,9 @@ export const TopNav: React.FC<TopNavProps> = ({
         border: `1px solid ${S.ruleSoft}`, maxWidth: 680,
       }}>
         {navItems.map(item => {
-          const active = currentView === item.id;
+          const active = isActive(item.path);
           return (
-            <button key={item.id} onClick={() => onViewChange(item.id)}
+            <button key={item.path} onClick={() => setLocation(item.path)}
               style={{
                 position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 7,
                 padding: '8px 14px', borderRadius: 24, border: 'none', cursor: 'pointer',

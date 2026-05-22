@@ -179,10 +179,8 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
       distanceM = distRes.rows[0].m;
     }
     const flagged = distanceM != null && distanceM > DISTANCE_THRESHOLD_M;
-    const postStatus = flagged ? 'pending_review' : 'live';
-    const locStatus = flagged
-      ? 'pending_review'
-      : locationLat != null ? 'verified' : 'none';
+    const postStatus = 'pending_review'; // all posts require moderation before going live
+    const locStatus = locationLat != null ? (flagged ? 'pending_review' : 'verified') : 'none';
 
     const postRes = await client.query<{ id: string }>(
       `INSERT INTO posts
@@ -207,13 +205,11 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
 
     const postId = postRes.rows[0].id;
 
-    if (flagged) {
-      await client.query(
-        `INSERT INTO moderation_queue (post_id, reason, distance_m)
-         VALUES ($1, 'distance_exceeded', $2)`,
-        [postId, distanceM]
-      );
-    }
+    await client.query(
+      `INSERT INTO moderation_queue (post_id, reason, distance_m)
+       VALUES ($1, $2, $3)`,
+      [postId, flagged ? 'distance_exceeded' : 'manual', distanceM]
+    );
 
     if (tags?.length) {
       const tagValues = tags.map((_, i) => `($1, $${i + 2})`).join(', ');

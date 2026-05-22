@@ -4,15 +4,6 @@ import { verifyToken, AuthRequest } from '../middleware/auth';
 
 export const moderationRouter = Router();
 
-async function isModerator(userId: string): Promise<boolean> {
-  const res = await pool.query(
-    `SELECT 1 FROM user_regions
-     WHERE user_id = $1 AND role IN ('moderator','hub_coordinator') LIMIT 1`,
-    [userId]
-  );
-  return res.rows.length > 0;
-}
-
 // GET /api/moderation  – pending queue (all logged-in users for now)
 moderationRouter.get('/', verifyToken, async (req: AuthRequest, res) => {
   try {
@@ -63,9 +54,9 @@ moderationRouter.get('/', verifyToken, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/moderation/:id/review  – approve or reject (all logged-in users for now)
+// POST /api/moderation/:id/review  – approve or reject
 moderationRouter.post('/:id/review', verifyToken, async (req: AuthRequest, res) => {
-  const { decision, note } = req.body as { decision: 'approved' | 'rejected'; note?: string };
+  const { decision, reason } = req.body as { decision: 'approved' | 'rejected'; reason?: string };
 
   if (decision !== 'approved' && decision !== 'rejected') {
     return res.status(400).json({ error: 'decision must be "approved" or "rejected"' });
@@ -83,27 +74,40 @@ moderationRouter.post('/:id/review', verifyToken, async (req: AuthRequest, res) 
     const userId = userRes.rows[0].id;
 
     const queueRes = await client.query(
-      `SELECT id, post_id FROM moderation_queue WHERE id = $1 AND status = 'pending'`,
+      `SELECT mq.id, mq.post_id, p.author_id
+       FROM moderation_queue mq
+       JOIN posts p ON p.id = mq.post_id
+       WHERE mq.id = $1 AND mq.status = 'pending'`,
       [req.params.id]
     );
     if (!queueRes.rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Queue entry not found or already reviewed' });
     }
-    const { post_id: postId } = queueRes.rows[0];
+    const { post_id: postId, author_id: authorId } = queueRes.rows[0];
     const newPostStatus = decision === 'approved' ? 'live' : 'rejected';
 
     await client.query(
       `UPDATE moderation_queue
        SET status = $1, moderator_id = $2, moderator_note = $3, reviewed_at = now()
        WHERE id = $4`,
-      [decision, userId, note ?? null, req.params.id]
+      [decision, userId, reason ?? null, req.params.id]
     );
 
     await client.query(
       'UPDATE posts SET post_status = $1, moderation_note = $2 WHERE id = $3',
-      [newPostStatus, note ?? null, postId]
+      [newPostStatus, reason ?? null, postId]
     );
+
+    // Notify the post author
+    if (authorId) {
+      const notifType = decision === 'approved' ? 'post_approved' : 'post_rejected';
+      await client.query(
+        `INSERT INTO notifications (user_id, post_id, type, reason)
+         VALUES ($1, $2, $3, $4)`,
+        [authorId, postId, notifType, reason ?? null]
+      );
+    }
 
     await client.query('COMMIT');
     return res.json({ decision, postId, newPostStatus });

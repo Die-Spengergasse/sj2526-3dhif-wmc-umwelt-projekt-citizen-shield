@@ -12,8 +12,6 @@ interface FeedViewProps {
   onPostClick: () => void;
   onRegionSelect: (index: number) => void;
   onVote: (postId: string, voteType: 'upvote' | 'downvote') => void;
-  onPin?: (post: Post) => void;
-  pinnedPosts?: Record<string, string[]>;
   loadingPosts: boolean;
 }
 
@@ -38,7 +36,7 @@ const RegionPill: React.FC<{ region: Region; active: boolean; onClick: () => voi
 
 export const FeedView: React.FC<FeedViewProps> = ({
   posts, regions, activeRegion, onPostClick, onRegionSelect,
-  onVote, onPin, pinnedPosts, loadingPosts,
+  onVote, loadingPosts,
 }) => {
   const [filterType, setFilterType] = useState<FilterType>('all');
 
@@ -130,15 +128,11 @@ export const FeedView: React.FC<FeedViewProps> = ({
               ))}
             </div>
           ) : filtered.length > 0 ? (
-            filtered.map((post, i) => {
-              const pinList = pinnedPosts?.[post.regionId] || [];
-              const isPinned = pinList.includes(post.id);
-              return (
-                <Reveal key={post.id} delay={i * 60}>
-                  <TimelineItem post={post} onVote={onVote} onPin={onPin} isPinnedToCommunity={isPinned} />
-                </Reveal>
-              );
-            })
+            filtered.map((post, i) => (
+              <Reveal key={post.id} delay={i * 60}>
+                <TimelineItem post={post} onVote={onVote} />
+              </Reveal>
+            ))
           ) : (
             <div style={{ padding: 48, textAlign: 'center', background: S.paper,
               border: `1px solid ${S.rule}`, borderRadius: 16 }}>

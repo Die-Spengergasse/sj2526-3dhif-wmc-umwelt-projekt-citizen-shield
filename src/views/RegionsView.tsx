@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { ChevronLeft, ChevronRight, Loader2, CheckCircle2, MessageSquare, Radio, Users, Heart,
+import { ChevronLeft, ChevronRight, Loader2, CheckCircle2, Radio, Users, Heart,
   ShieldCheck, MapPin, ShieldAlert, X, Send, LogOut } from 'lucide-react';
 import { S, INTENSITY, REGION_COORDS } from '../design-tokens';
 import { Reveal, AmbientGlow, CountUp, IntensityRing, showToast } from '../motion';
@@ -321,10 +321,7 @@ interface RegionsViewProps {
   onRegionIdxChange: (idx: number) => void;
   onSignIn: () => void;
   onOpenPostForm: (user: AppUser | null, signIn: () => void) => void;
-  onOpenChat: (regionId: string) => void;
   onVote: (postId: string, voteType: 'upvote' | 'downvote') => void;
-  onPin?: (post: Post) => void;
-  pinnedPosts?: Record<string, string[]>;
   onJoinRegion: (slug: string, user: AppUser | null, signIn: () => void) => void;
   onLeaveRegion: (slug: string) => void;
   joiningRegion: string | null;
@@ -334,8 +331,8 @@ interface RegionsViewProps {
 
 export const RegionsView: React.FC<RegionsViewProps> = ({
   regions, posts, user, activeRegionIdx, onRegionIdxChange,
-  onSignIn, onOpenPostForm, onOpenChat,
-  onVote, onPin, pinnedPosts, onJoinRegion, onLeaveRegion, joiningRegion, joinedRegions, onViewChange,
+  onSignIn, onOpenPostForm,
+  onVote, onJoinRegion, onLeaveRegion, joiningRegion, joinedRegions, onViewChange,
 }) => {
   const [showSelector,    setShowSelector]    = useState(false);
   const [loadingPosts,    setLoadingPosts]    = useState(false);
@@ -501,13 +498,6 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
           }}>
             Safety Guide
           </button>
-          <button onClick={() => onOpenChat(region.id)} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px',
-            borderRadius: 30, border: 'none', cursor: 'pointer',
-            fontWeight: 600, fontSize: 13, fontFamily: 'inherit', background: S.paperHi, color: S.ink,
-          }}>
-            <MessageSquare size={14} /> Open Chat
-          </button>
         </div>
       </section>
 
@@ -645,8 +635,6 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
               <p style={{ fontSize: 10, fontWeight: 700, color: S.ash, textTransform: 'uppercase',
                 letterSpacing: '0.16em', marginBottom: 12 }}>Community tools</p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <ActionButton label="Regional chat" icon={<MessageSquare size={14} />}
-                  color="text-primary" onClick={() => onOpenChat(region.id)} />
                 <ActionButton label="Emergency aid" icon={<Heart size={14} />} color="text-primary"
                   onClick={() => { if (!user) { onSignIn(); return; } setEmergencyOpen(true); }} />
                 <ActionButton label="Share update" icon={<Radio size={14} />}
@@ -679,23 +667,17 @@ export const RegionsView: React.FC<RegionsViewProps> = ({
               ))}
             </div>
           ) : regionPosts.length > 0 ? (
-            regionPosts.map((post, i) => {
-              const pinList = pinnedPosts?.[post.regionId];
-              const isPinned = Array.isArray(pinList) ? pinList.includes(post.id) : false;
-              return (
-                <div key={post.id} ref={el => { postRefs.current[post.id] = el; }}>
-                  <Reveal delay={i * 60}>
-                    <TimelineItem
-                      post={post}
-                      onVote={onVote}
-                      onPin={onPin}
-                      isPinnedToCommunity={isPinned}
-                      highlighted={highlightedPost === post.id}
-                    />
-                  </Reveal>
-                </div>
-              );
-            })
+            regionPosts.map((post, i) => (
+              <div key={post.id} ref={el => { postRefs.current[post.id] = el; }}>
+                <Reveal delay={i * 60}>
+                  <TimelineItem
+                    post={post}
+                    onVote={onVote}
+                    highlighted={highlightedPost === post.id}
+                  />
+                </Reveal>
+              </div>
+            ))
           ) : (
             <div style={{ padding: 48, textAlign: 'center', background: S.paper,
               border: `1px solid ${S.rule}`, borderRadius: 16 }}>

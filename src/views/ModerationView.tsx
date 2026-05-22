@@ -29,11 +29,13 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 export const ModerationView: React.FC<ModerationViewProps> = ({ user, onSignIn }) => {
-  const [queue,      setQueue]      = useState<ApiModerationItem[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState<string | null>(null);
-  const [reviewing,  setReviewing]  = useState<Record<string, boolean>>({});
-  const [reviewed,   setReviewed]   = useState<Record<string, 'approved' | 'rejected'>>({});
+  const [queue,          setQueue]          = useState<ApiModerationItem[]>([]);
+  const [loading,        setLoading]        = useState(true);
+  const [error,          setError]          = useState<string | null>(null);
+  const [reviewing,      setReviewing]      = useState<Record<string, boolean>>({});
+  const [reviewed,       setReviewed]       = useState<Record<string, 'approved' | 'rejected'>>({});
+  const [expandedAction, setExpandedAction] = useState<Record<string, 'approve' | 'reject' | null>>({});
+  const [reasons,        setReasons]        = useState<Record<string, string>>({});
 
   const load = useCallback(() => {
     setLoading(true);
@@ -45,11 +47,19 @@ export const ModerationView: React.FC<ModerationViewProps> = ({ user, onSignIn }
 
   useEffect(() => { if (user) load(); else setLoading(false); }, [user, load]);
 
+  const openAction = (id: string, action: 'approve' | 'reject') => {
+    setExpandedAction(prev => ({ ...prev, [id]: prev[id] === action ? null : action }));
+  };
+
   const handleReview = async (item: ApiModerationItem, decision: 'approved' | 'rejected') => {
+    const reason = reasons[item.id]?.trim();
+    if (decision === 'rejected' && !reason) return;
+
     setReviewing(prev => ({ ...prev, [item.id]: true }));
     try {
-      await reviewPost(item.id, decision);
+      await reviewPost(item.id, decision, reason || undefined);
       setReviewed(prev => ({ ...prev, [item.id]: decision }));
+      setExpandedAction(prev => ({ ...prev, [item.id]: null }));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Review failed');
     } finally {
@@ -144,7 +154,9 @@ export const ModerationView: React.FC<ModerationViewProps> = ({ user, onSignIn }
           {queue.map((item, i) => {
             const done = reviewed[item.id];
             const busy = reviewing[item.id];
+            const action = expandedAction[item.id];
             const typeColor = TYPE_COLOR[item.post.type] || S.secondary;
+            const reason = reasons[item.id] || '';
 
             return (
               <Reveal key={item.id} delay={i * 50}>
@@ -221,41 +233,104 @@ export const ModerationView: React.FC<ModerationViewProps> = ({ user, onSignIn }
                       ) : (
                         <>
                           <button
-                            onClick={() => handleReview(item, 'approved')}
+                            onClick={() => openAction(item.id, 'approve')}
                             disabled={busy}
                             style={{
                               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                              padding: '9px 18px', borderRadius: 20, border: '1px solid #22c55e60',
-                              background: '#22c55e12', cursor: busy ? 'not-allowed' : 'pointer',
+                              padding: '9px 18px', borderRadius: 20, border: `1px solid ${action === 'approve' ? '#22c55e' : '#22c55e60'}`,
+                              background: action === 'approve' ? '#22c55e18' : '#22c55e12',
+                              cursor: busy ? 'not-allowed' : 'pointer',
                               fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
                               color: '#16a34a', letterSpacing: '0.1em', textTransform: 'uppercase',
                               opacity: busy ? 0.6 : 1, transition: 'all 160ms ease',
-                            }}
-                            onMouseEnter={e => { if (!busy) (e.currentTarget as HTMLButtonElement).style.background = '#22c55e22'; }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#22c55e12'; }}>
-                            {busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={13} />}
+                            }}>
+                            <Check size={13} />
                             Approve
                           </button>
                           <button
-                            onClick={() => handleReview(item, 'rejected')}
+                            onClick={() => openAction(item.id, 'reject')}
                             disabled={busy}
                             style={{
                               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                              padding: '9px 18px', borderRadius: 20, border: `1px solid ${S.primary}50`,
-                              background: S.primary + '10', cursor: busy ? 'not-allowed' : 'pointer',
+                              padding: '9px 18px', borderRadius: 20, border: `1px solid ${action === 'reject' ? S.primary : S.primary + '50'}`,
+                              background: action === 'reject' ? S.primary + '18' : S.primary + '10',
+                              cursor: busy ? 'not-allowed' : 'pointer',
                               fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
                               color: S.primary, letterSpacing: '0.1em', textTransform: 'uppercase',
                               opacity: busy ? 0.6 : 1, transition: 'all 160ms ease',
-                            }}
-                            onMouseEnter={e => { if (!busy) (e.currentTarget as HTMLButtonElement).style.background = S.primary + '20'; }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = S.primary + '10'; }}>
-                            {busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <X size={13} />}
+                            }}>
+                            <X size={13} />
                             Reject
                           </button>
                         </>
                       )}
                     </div>
                   </div>
+
+                  {/* Inline reason / note form */}
+                  {!done && action && (
+                    <div style={{
+                      marginTop: 14, padding: '14px 16px', borderRadius: 10,
+                      background: action === 'reject' ? S.primary + '08' : '#22c55e0a',
+                      border: `1px solid ${action === 'reject' ? S.primary + '30' : '#22c55e30'}`,
+                    }}>
+                      <label style={{
+                        fontSize: 10, fontWeight: 700, color: action === 'reject' ? S.primary : '#16a34a',
+                        textTransform: 'uppercase', letterSpacing: '0.12em',
+                        display: 'block', marginBottom: 8,
+                      }}>
+                        {action === 'reject' ? 'Reason (required)' : 'Note (optional)'}
+                      </label>
+                      <textarea
+                        value={reason}
+                        onChange={e => setReasons(prev => ({ ...prev, [item.id]: e.target.value }))}
+                        placeholder={action === 'reject'
+                          ? 'Explain why this report is being rejected…'
+                          : 'Add an optional note for the author…'}
+                        rows={3}
+                        style={{
+                          width: '100%', background: S.paperHi, border: `1px solid ${S.rule}`,
+                          borderRadius: 8, padding: '8px 11px', fontSize: 12.5, color: S.ink,
+                          outline: 'none', resize: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+                          transition: 'border-color 160ms ease',
+                        }}
+                        onFocus={e => (e.target.style.borderColor = action === 'reject' ? S.primary : '#22c55e')}
+                        onBlur={e => (e.target.style.borderColor = S.rule)}
+                      />
+                      <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => setExpandedAction(prev => ({ ...prev, [item.id]: null }))}
+                          style={{
+                            padding: '7px 14px', borderRadius: 20, border: `1px solid ${S.rule}`,
+                            background: 'transparent', cursor: 'pointer', fontFamily: 'inherit',
+                            fontSize: 11, fontWeight: 700, color: S.muted, letterSpacing: '0.1em', textTransform: 'uppercase',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => handleReview(item, action === 'reject' ? 'rejected' : 'approved')}
+                          disabled={busy || (action === 'reject' && !reason.trim())}
+                          style={{
+                            padding: '7px 18px', borderRadius: 20, border: 'none',
+                            cursor: busy || (action === 'reject' && !reason.trim()) ? 'not-allowed' : 'pointer',
+                            fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+                            letterSpacing: '0.1em', textTransform: 'uppercase',
+                            color: '#fff',
+                            background: action === 'reject' ? S.primary : '#22c55e',
+                            opacity: busy || (action === 'reject' && !reason.trim()) ? 0.6 : 1,
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                          }}
+                        >
+                          {busy
+                            ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                            : action === 'reject' ? <X size={12} /> : <Check size={12} />
+                          }
+                          {action === 'reject' ? 'Confirm Reject' : 'Confirm Approve'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </Reveal>
             );
