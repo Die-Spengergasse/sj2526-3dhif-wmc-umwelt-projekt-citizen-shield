@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { pool } from '../db';
-import { verifyToken, AuthRequest } from '../middleware/auth';
+import { verifyToken, requireAdmin, AuthRequest } from '../middleware/auth';
 
 export const moderationRouter = Router();
 
-// GET /api/moderation  – pending queue (all logged-in users for now)
-moderationRouter.get('/', verifyToken, async (req: AuthRequest, res) => {
+// GET /api/moderation  – pending queue (admin-only)
+moderationRouter.get('/', verifyToken, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const userRes = await pool.query('SELECT id FROM users WHERE google_uid = $1', [req.firebaseUid]);
     if (!userRes.rows[0]) return res.status(404).json({ error: 'User not found' });
@@ -54,8 +54,8 @@ moderationRouter.get('/', verifyToken, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/moderation/:id/review  – approve or reject
-moderationRouter.post('/:id/review', verifyToken, async (req: AuthRequest, res) => {
+// POST /api/moderation/:id/review  – approve or reject (admin-only)
+moderationRouter.post('/:id/review', verifyToken, requireAdmin, async (req: AuthRequest, res) => {
   const { decision, reason } = req.body as { decision: 'approved' | 'rejected'; reason?: string };
 
   if (decision !== 'approved' && decision !== 'rejected') {

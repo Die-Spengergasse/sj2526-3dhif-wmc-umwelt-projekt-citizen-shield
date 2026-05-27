@@ -79,6 +79,7 @@ export interface AppUser {
   email: string;
   photoURL?: string | null;
   isVerified: boolean;
+  isAdmin?: boolean;
   stats: {
     totalPosts: number;
     totalUpvotesReceived: number;

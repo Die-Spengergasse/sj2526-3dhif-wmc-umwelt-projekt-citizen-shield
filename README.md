@@ -73,7 +73,7 @@ Then put the matching credentials into your `.env`:
 DATABASE_URL=postgres://citizen_shield_user:citizen_shield@localhost:5432/citizen_shield
 ```
 
-Re-running the script is safe: if the role or database already exists, the password is updated and ownership is re-applied.
+Re-running the script is safe: if the role or database already exists, the password is updated and ownership is re-applied. The script also sets `is_admin = TRUE` for the 4 team email addresses (idempotent `UPDATE` — safe to re-run after new team members log in).
 
 ### 4. Configure Firebase (frontend)
 
@@ -81,15 +81,15 @@ Update `firebase-applet-config.json` with your Firebase project's web app config
 
 ## Team Collaboration
 
-After every `git pull`, run once:
+After every `git pull`, run the setup script once to apply any new schema changes:
 
 ```bash
 psql -h localhost -U postgres \
-  -v admin_password=DeinPasswort \
+  -v admin_password=YourPassword \
   -f Backend/000_citizen_shield_complete.sql
 ```
 
-The script is fully idempotent — all tables, enums, and seed data use `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`. New schema changes (e.g. the `notifications` table) are always added to this single file, so re-running it picks up any additions automatically.
+The script is fully idempotent — all tables, enums, indexes, triggers, constraints, and seed data use `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`. Admin emails are set automatically. No separate migration files, no manual `ALTER TABLE` needed.
 
 ## Running the Project
 
@@ -131,7 +131,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 │   ├── db.ts                                      # PostgreSQL connection pool
 │   ├── server.ts                                  # Express app entrypoint
 │   ├── middleware/
-│   │   └── auth.ts                                # Firebase token verification middleware
+│   │   └── auth.ts                                # Firebase token verification + requireAdmin middleware
 │   └── routes/
 │       ├── auth.ts                                # POST /api/auth/sync, GET /api/auth/me
 │       ├── regions.ts                             # GET /api/regions, GET /api/regions/:slug, POST /api/regions/:slug/join
@@ -156,7 +156,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 │   │   ├── Wordmark.tsx                           # Shield logo + logotype
 │   │   ├── TopNav.tsx                             # Top navigation with notifications + auth UI (wouter)
 │   │   ├── Sidebar.tsx                            # No-op (navigation is in TopNav)
-│   │   ├── BottomNav.tsx                          # Mobile bottom navigation — 4 routes (wouter)
+│   │   ├── BottomNav.tsx                          # Mobile bottom navigation — 4 routes + Review (admin-only) (wouter)
 │   │   ├── SignInModal.tsx                        # Google sign-in overlay
 │   │   ├── PostForm.tsx                           # 2-step submit community report modal
 │   │   ├── TimelineItem.tsx                       # Post card with vote + VoterPopover; title/desc navigate to /post/:id
@@ -167,9 +167,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 │       ├── FeedView.tsx                           # /feed — Region feed with filter tabs + sidebar
 │       ├── SafetyView.tsx                         # /safety — Safety protocols + emergency contact
 │       ├── RegionsView.tsx                        # /regions — Region carousel + timeline + map sidebar
-│       ├── ModerationView.tsx                     # /moderation — Review queue with inline reason/note fields
-│       ├── PostDetailView.tsx                     # /post/:id — Twitter-style post overlay with comments
-│       └── GlobeView.tsx                          # Three.js interactive globe (topojson land)
+│       ├── ModerationView.tsx                     # /moderation — Admin-only review queue with inline reason/note fields
+│       └── PostDetailView.tsx                     # /post/:id — Twitter-style post overlay with comments
 ├── firebase-applet-config.json                    # Firebase web app config
 ├── vite.config.ts                                 # Vite config with API proxy
 ├── tsconfig.json                                  # TypeScript config
@@ -184,7 +183,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 - **Regions** — List all regions (sorted by intensity), get region details with safe zones and resources, join a region, get member counts
 - **Posts** — Create posts with location blurring (~1 km precision), list posts with filtering (by region, status, tag), get single post, delete posts (author or moderator)
 - **Voting** — Upvote/downvote with upsert logic, vote removal, DB triggers that auto-sync denormalized counts
-- **Moderation** — Queue for flagged posts, moderator-only access, approve/reject workflow that updates post status and sends a notification to the post author (with optional reason/note)
+- **Moderation** — Queue for flagged posts, admin-only access (`requireAdmin` middleware), approve/reject workflow that updates post status and sends a notification to the post author (with optional reason/note)
+- **Admin roles** — 4 hardcoded team email addresses are auto-promoted to admin on login via `auth/sync`; `is_admin` flag is exposed on `/api/auth/me` and enforced server-side by `requireAdmin`
 - **Notifications** — Per-user notification feed for post approval/rejection; endpoints to fetch, mark single read, mark all read
 - **Distance-based moderation** — Posts whose user-supplied GPS is more than 5 km from the region center are auto-flagged as `pending_review` and inserted into `moderation_queue` (uses the `earthdistance` extension and the seeded `regions.center_lat` / `center_lng`)
 - **Image upload** — Multipart upload to Azure Blob Storage with file type validation (JPEG, PNG, WebP) and 10 MB limit; images are run through `sharp` to apply EXIF orientation and strip all metadata (incl. GPS) before upload
@@ -200,9 +200,10 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 - **Five views** — Hub (`/`), Regions (`/regions?region=<slug>`), Feed (`/feed`), Safety (`/safety`), Moderation (`/moderation`)
 - **Post detail overlay** — `/post/:id` renders as a portal over the current view (Twitter/X style): full post, comment input (Enter to send), comment list oldest-first; closes on Escape, X, or backdrop click; title/description in feed cards navigate here
 - **Moderation UI** — Inline reason textarea for reject (required), optional note for approve; decision sent to API which notifies the post author
+- **Admin-only Moderation Tab** — `/moderation` route and the Review nav item are only visible to the 4 team email addresses (`user.isAdmin` guard in `TopNav`, `BottomNav`, and `ModerationView`)
 - **Real notifications** — Bell dropdown fetches from `/api/notifications`; mark-read per item or all; unread count badge; relative timestamps via `useNow`
-- **Interactive globe** — Three.js sphere with topojson-derived continent point-cloud (accessible via direct URL; not in main nav)
-- **Responsive layout** — Desktop top nav (5 items), mobile 4-item bottom nav
+- **Community/Chat removed** — `CommunityView`, `Chat`, and Firebase Firestore are no longer part of the app
+- **Responsive layout** — Desktop top nav, mobile bottom nav (extra Review tab when the signed-in user is an admin)
 - **Inline CSS** — All components use `style={{}}` props; only utility CSS classes come from `index.css`
 
 ## What Needs to Be Implemented
@@ -210,7 +211,6 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ### Next up (highest priority)
 
 - [ ] **Geolocation capture in `PostForm`** — call `navigator.geolocation.getCurrentPosition` and pass `locationLat` / `locationLng` to `POST /api/posts`. **This is the missing piece that makes the existing distance-based moderation actually fire** — without GPS from the client, every post still goes live.
-- [ ] **Seed data for safe zones and resources** — `region_safe_zones` and `region_resources` are empty, so the region detail panels render blank lists.
 
 ### Frontend — New Features
 
@@ -233,11 +233,14 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Recently completed
 
+- [x] **Admin role system** — 4 hardcoded team emails, auto-set on login via `auth/sync`, enforced by `requireAdmin` middleware
+- [x] **Notifications system** — `post_approved` / `post_rejected` notifications with bell UI
+- [x] **PostDetailView overlay** — Twitter/X-style detail view with comments
 - [x] **URL routing with wouter** — Real browser history, Back/Forward, bookmarkable URLs; `/post/:id` overlay pattern
-- [x] **PostDetailView** — Twitter/X-style post detail overlay with comments (Enter to send)
-- [x] **Notification system** — Backend `notifications` table, API endpoints, ModerationView sends notifications on approve/reject; frontend fetches and displays with live relative timestamps
+- [x] **Community/Chat/Firestore removed** — `CommunityView`, `Chat`, and Firebase Firestore deleted
+- [x] **DB fully restructured and idempotent** — Single `000_citizen_shield_complete.sql` (11 sections), safe to re-run after every `git pull`
+- [x] **Seed data for safe zones and resources** — All 5 regions have safe zones and resources seeded idempotently
 - [x] **Moderation UI** — Inline reason/note fields; reject requires a reason; author is notified via API
-- [x] **Removed Community + Chat** — `CommunityView`, `Chat`, Firebase Firestore, pin endpoints, and all related state removed
 - [x] **Full design migration** — All 12 prototype files in `src/design-import/` integrated and deleted
 - [x] **Design tokens** — `src/design-tokens.ts` (S palette, INTENSITY, REGION_COORDS)
 - [x] **Motion library** — `src/motion.tsx` (Reveal, CountUp, Skeleton, IntensityRing, Toaster…)

@@ -82,6 +82,14 @@ export const ModerationView: React.FC<ModerationViewProps> = ({ user, onSignIn }
     );
   }
 
+  if (!user.isAdmin) {
+    return (
+      <div style={{ textAlign: 'center', padding: '64px', color: 'var(--text-muted)' }}>
+        Access denied.
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 36 }}>
       {/* HERO */}

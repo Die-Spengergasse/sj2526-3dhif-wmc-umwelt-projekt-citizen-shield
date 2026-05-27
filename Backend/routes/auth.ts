@@ -4,6 +4,13 @@ import { verifyToken, AuthRequest } from '../middleware/auth';
 
 export const authRouter = Router();
 
+const ADMIN_EMAILS = [
+  'emil.sack@gmail.com',
+  'lvl14egiant@gmail.com',
+  'o.chorib@gmail.com',
+  'louismelon20@gmail.com',
+];
+
 // POST /api/auth/sync
 // Called after Firebase login to create/update the user in Postgres
 authRouter.post('/sync', verifyToken, async (req: AuthRequest, res) => {
@@ -11,19 +18,21 @@ authRouter.post('/sync', verifyToken, async (req: AuthRequest, res) => {
   const googleUid = req.firebaseUid!;
 
   try {
-    const result = await pool.query<{ id: string; is_verified: boolean }>(
-      `INSERT INTO users (google_uid, email, display_name, avatar_url, last_active_at)
-       VALUES ($1, $2, $3, $4, now())
+    const result = await pool.query<{ id: string; is_verified: boolean; is_admin: boolean }>(
+      `INSERT INTO users
+         (google_uid, email, display_name, avatar_url, last_active_at, is_admin)
+       VALUES ($1, $2, $3, $4, now(), $5)
        ON CONFLICT (google_uid) DO UPDATE
          SET display_name    = EXCLUDED.display_name,
              avatar_url      = EXCLUDED.avatar_url,
-             last_active_at  = now()
-       RETURNING id, is_verified`,
-      [googleUid, email, displayName, photoURL ?? null]
+             last_active_at  = now(),
+             is_admin        = EXCLUDED.is_admin
+       RETURNING id, is_verified, is_admin`,
+      [googleUid, email, displayName, photoURL ?? null, ADMIN_EMAILS.includes(email)]
     );
 
     const user = result.rows[0];
-    return res.json({ id: user.id, isVerified: user.is_verified });
+    return res.json({ id: user.id, isVerified: user.is_verified, isAdmin: user.is_admin });
   } catch (err) {
     console.error('auth/sync error', err);
     return res.status(500).json({ error: 'Database error' });
@@ -34,7 +43,8 @@ authRouter.post('/sync', verifyToken, async (req: AuthRequest, res) => {
 authRouter.get('/me', verifyToken, async (req: AuthRequest, res) => {
   try {
     const result = await pool.query(
-      `SELECT u.id, u.google_uid, u.email, u.display_name, u.avatar_url, u.is_verified,
+      `SELECT u.id, u.google_uid, u.email, u.display_name, u.avatar_url,
+              u.is_verified, u.is_admin,
               u.created_at, u.last_active_at,
               COALESCE(COUNT(DISTINCT p.id), 0)         AS post_count,
               COALESCE(SUM(p.upvote_count), 0)          AS upvotes_received,
@@ -55,6 +65,7 @@ authRouter.get('/me', verifyToken, async (req: AuthRequest, res) => {
       displayName: u.display_name,
       avatarUrl: u.avatar_url,
       isVerified: u.is_verified,
+      isAdmin: u.is_admin,
       createdAt: u.created_at,
       lastActiveAt: u.last_active_at,
       stats: {

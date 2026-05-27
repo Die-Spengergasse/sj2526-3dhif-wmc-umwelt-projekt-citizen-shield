@@ -16,6 +16,7 @@ export interface DbUser {
   displayName: string;
   avatarUrl: string | null;
   isVerified: boolean;
+  isAdmin?: boolean;
   createdAt: string;
   lastActiveAt: string;
   stats: {

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import admin from 'firebase-admin';
+import { pool } from '../db';
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -43,4 +44,22 @@ export async function optionalToken(req: AuthRequest, res: Response, next: NextF
     // ignore invalid token for optional auth
   }
   next();
+}
+
+export async function requireAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  if (!req.firebaseUid) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  try {
+    const result = await pool.query(
+      'SELECT is_admin FROM users WHERE google_uid = $1',
+      [req.firebaseUid]
+    );
+    if (!result.rows[0]?.is_admin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    next();
+  } catch {
+    return res.status(500).json({ error: 'Database error' });
+  }
 }

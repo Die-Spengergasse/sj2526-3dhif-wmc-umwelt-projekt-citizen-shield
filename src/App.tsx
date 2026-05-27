@@ -33,6 +33,7 @@ function AppContent() {
         email:       firebaseUser.email ?? dbUser?.email ?? '',
         photoURL:    firebaseUser.photoURL ?? undefined,
         isVerified:  dbUser?.isVerified ?? false,
+        isAdmin:     dbUser?.isAdmin ?? false,
         stats: {
           totalPosts:            dbUser?.stats?.totalPosts            ?? 0,
           totalUpvotesReceived:  dbUser?.stats?.totalUpvotesReceived  ?? 0,
@@ -406,7 +407,7 @@ function AppContent() {
         </footer>
       </main>
 
-      <BottomNav />
+      <BottomNav user={user} />
     </div>
   );
 }

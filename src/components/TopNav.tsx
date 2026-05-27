@@ -41,7 +41,7 @@ export const TopNav: React.FC<TopNavProps> = ({
     { path: '/regions',     label: 'Regions', icon: <MapIcon size={14}/> },
     { path: '/feed',        label: 'Feed',    icon: <Radio size={14}/> },
     { path: '/safety',      label: 'Safety',  icon: <ShieldCheck size={14}/> },
-    ...(user ? [{ path: '/moderation', label: 'Review', icon: <ShieldAlert size={14}/> }] : []),
+    ...(user?.isAdmin ? [{ path: '/moderation', label: 'Review', icon: <ShieldAlert size={14}/> }] : []),
   ];
 
   const isActive = (path: string) => {

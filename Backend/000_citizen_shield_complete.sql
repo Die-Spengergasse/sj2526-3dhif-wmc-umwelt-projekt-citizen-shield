@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS users (
 
   -- Verifikations-Badge
   is_verified             BOOLEAN       NOT NULL DEFAULT FALSE,
+  is_admin                BOOLEAN       NOT NULL DEFAULT FALSE,
   verified_at             TIMESTAMPTZ,
   verified_revoked_at     TIMESTAMPTZ,
   verified_revoke_reason  TEXT,
@@ -192,9 +193,13 @@ CREATE TABLE IF NOT EXISTS users (
   last_active_at          TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
+-- Idempotent: füge is_admin auch bei bereits bestehender users-Tabelle hinzu
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+
 COMMENT ON TABLE  users                        IS 'Alle registrierten User. Authentifizierung via Google OAuth / Firebase.';
 COMMENT ON COLUMN users.google_uid             IS 'Firebase Auth UID – wird beim Login zur Identifikation verwendet.';
 COMMENT ON COLUMN users.is_verified            IS 'Blaues Häkchen: einmalig vergeben, kann nur durch Admin entzogen werden.';
+COMMENT ON COLUMN users.is_admin               IS 'TRUE für die 4 Projekt-Teammitglieder. Wird beim Login automatisch gesetzt wenn die E-Mail in der Admin-Liste steht.';
 COMMENT ON COLUMN users.verified_revoke_reason IS 'Pflichtfeld wenn is_verified auf FALSE gesetzt wird.';
 
 
@@ -757,6 +762,21 @@ INSERT INTO region_resources (region_id, title, category, location)
 SELECT r.id, 'Press Freedom Resource Centre', 'Comms', 'Rustaveli Ave, Tbilisi'
 FROM regions r WHERE r.slug = 'georgia'
 ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+
+-- ============================================================
+-- ADMIN SEED — Teammitglieder bekommen is_admin automatisch
+-- beim nächsten Login (via auth/sync). Dieser Block setzt
+-- is_admin für bereits existierende User (idempotent):
+-- ============================================================
+UPDATE users
+SET is_admin = TRUE
+WHERE email IN (
+  'emil.sack@gmail.com',
+  'lvl14egiant@gmail.com',
+  'o.chorib@gmail.com',
+  'louismelon20@gmail.com'
+);
 
 
 -- ============================================================

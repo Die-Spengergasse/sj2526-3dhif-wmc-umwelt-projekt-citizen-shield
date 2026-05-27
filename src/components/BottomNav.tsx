@@ -1,9 +1,14 @@
 import React from 'react';
 import { useLocation } from 'wouter';
-import { Globe, Map as MapIcon, Radio, ShieldCheck } from 'lucide-react';
+import { Globe, Map as MapIcon, Radio, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { S } from '../design-tokens';
+import { AppUser } from '../types';
 
-export const BottomNav: React.FC = () => {
+interface BottomNavProps {
+  user?: AppUser | null;
+}
+
+export const BottomNav: React.FC<BottomNavProps> = ({ user }) => {
   const [location, setLocation] = useLocation();
 
   const items = [
@@ -11,6 +16,7 @@ export const BottomNav: React.FC = () => {
     { path: '/regions', label: 'Regions', icon: <MapIcon size={20}/> },
     { path: '/feed',    label: 'Feed',    icon: <Radio size={20}/> },
     { path: '/safety',  label: 'Safety',  icon: <ShieldCheck size={20}/> },
+    ...(user?.isAdmin ? [{ path: '/moderation', label: 'Review', icon: <ShieldAlert size={20}/> }] : []),
   ];
 
   return (
