@@ -111,6 +111,47 @@ The Vite dev server automatically proxies `/api/*` requests to the backend on po
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+## Exposing the Dev Server with ngrok
+
+You can share your local dev server over the internet (e.g. to test on a phone or show it to a teammate) using [ngrok](https://ngrok.com/). The free plan is enough.
+
+**Only port 3000 needs to be forwarded** — the Vite dev server proxies `/api/*` to the backend on `3001` internally, so a single tunnel covers both. `vite.config.ts` already allows `*.ngrok-free.app`, `*.ngrok-free.dev`, `*.ngrok.io`, and `*.ngrok.app` hosts.
+
+### 1. Configure ngrok
+
+Edit `~/.config/ngrok/ngrok.yml`:
+
+```yaml
+version: "3"
+agent:
+    authtoken: YOUR_NGROK_TOKEN
+tunnels:
+  frontend:
+    proto: http
+    addr: 3000
+```
+
+Indentation must be exactly as shown (no leading spaces on `tunnels:`).
+
+### 2. Start everything
+
+```bash
+npm run dev          # Terminal 1 — frontend on 3000
+npm run server:dev   # Terminal 2 — backend on 3001
+ngrok start frontend # Terminal 3 — public tunnel
+```
+
+ngrok will print a `https://<random>.ngrok-free.dev` URL — that's your public address.
+
+### 3. Authorise the ngrok domain in Firebase
+
+Google OAuth will reject sign-in until the ngrok host is allowlisted:
+
+1. [Firebase Console](https://console.firebase.google.com/) → your project → **Authentication** → **Settings** → **Authorized domains**
+2. **Add domain** → paste the ngrok host (e.g. `merlene-unvertebrate-gelidly.ngrok-free.dev`) → Save
+
+**Note:** the free ngrok plan gives you a new random subdomain on every restart, so you'll need to re-add it each session. To avoid this, claim a [static domain](https://dashboard.ngrok.com/domains) (free tier includes one) and start with `ngrok http --url=your-static-name.ngrok-free.app 3000` — then you only authorise it in Firebase once.
+
 ## Available Scripts
 
 | Command              | Description                                     |

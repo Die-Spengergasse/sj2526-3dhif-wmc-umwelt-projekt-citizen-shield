@@ -20,6 +20,10 @@ export default defineConfig(({mode}) => {
       headers: {
         'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
       },
+      // NGROK: only port 3000 needs to be forwarded — the proxy below relays
+      // /api/* to the local backend on 3001 from inside the dev server.
+      // If using a reserved ngrok subdomain, replace '.ngrok-free.app' here.
+      allowedHosts: ['.ngrok-free.app', '.ngrok.io', '.ngrok.app', '.ngrok-free.dev'],
       proxy: {
         '/api': {
           target: 'http://localhost:3001',
