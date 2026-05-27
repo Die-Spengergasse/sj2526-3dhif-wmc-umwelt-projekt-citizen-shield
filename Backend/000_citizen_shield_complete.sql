@@ -193,9 +193,6 @@ CREATE TABLE IF NOT EXISTS users (
   last_active_at          TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
--- Idempotent: füge is_admin auch bei bereits bestehender users-Tabelle hinzu
-ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
-
 COMMENT ON TABLE  users                        IS 'Alle registrierten User. Authentifizierung via Google OAuth / Firebase.';
 COMMENT ON COLUMN users.google_uid             IS 'Firebase Auth UID – wird beim Login zur Identifikation verwendet.';
 COMMENT ON COLUMN users.is_verified            IS 'Blaues Häkchen: einmalig vergeben, kann nur durch Admin entzogen werden.';
