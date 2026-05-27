@@ -1,16 +1,51 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, AlertTriangle, Info, Radio, Upload, Loader2, ChevronLeft, Plus, MapPin } from 'lucide-react';
+import { X, Send, AlertTriangle, Info, Radio, Upload, Loader2, ChevronLeft, Plus, MapPin, Crosshair } from 'lucide-react';
+import exifr from 'exifr';
 import { PostType } from '../types';
 import { apiUpload } from '../api';
 import { S } from '../design-tokens';
 
 const MAX_IMAGES = 5;
 
+type LocationSource = 'exif' | 'geolocation' | 'autocomplete' | 'manual';
+
 interface NominatimResult {
   place_id: number;
   display_name: string;
   lat: string;
   lon: string;
+}
+
+// Try to extract GPS coords from the first image that carries them.
+// Returns null if no image has usable GPS metadata.
+async function extractGpsFromImages(files: File[]): Promise<{ lat: number; lng: number } | null> {
+  for (const file of files) {
+    try {
+      const gps = await exifr.gps(file);
+      if (gps && typeof gps.latitude === 'number' && typeof gps.longitude === 'number'
+          && Number.isFinite(gps.latitude) && Number.isFinite(gps.longitude)) {
+        return { lat: gps.latitude, lng: gps.longitude };
+      }
+    } catch {
+      // ignore parse errors and try next file
+    }
+  }
+  return null;
+}
+
+// Reverse-geocode a coordinate into a human label via Nominatim (best-effort).
+async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=14`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data && typeof data.display_name === 'string') ? data.display_name : null;
+  } catch {
+    return null;
+  }
 }
 
 interface PostFormProps {
@@ -34,6 +69,7 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
   const [locationText, setLocationText] = useState('');
   const [locationLat,  setLocationLat]  = useState<number | undefined>();
   const [locationLng,  setLocationLng]  = useState<number | undefined>();
+  const [locationSource, setLocationSource] = useState<LocationSource | null>(null);
   const [suggestions,  setSuggestions]  = useState<NominatimResult[]>([]);
   const [isSearching,  setIsSearching]  = useState(false);
   const [imageFiles,   setImageFiles]   = useState<File[]>([]);
@@ -41,10 +77,13 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
   const [submitting,   setSubmitting]   = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [step,         setStep]         = useState(1);
+  const [isResolvingLocation, setIsResolvingLocation] = useState(false);
+  const [geoPermissionState, setGeoPermissionState] = useState<'idle' | 'prompted' | 'denied' | 'unavailable'>('idle');
 
   const fileRef     = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationRef = useRef<HTMLDivElement>(null);
+  const autoGeoTriedRef = useRef(false);
 
   const typeConfig = {
     critical:  { color: S.primary,   bg: `${S.primary}18`,   Icon: AlertTriangle, label: 'Critical',  desc: 'Urgent safety alerts, immediate dangers or critical changes.' },
@@ -69,6 +108,7 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
     // Clear previously selected coordinates when user types again
     setLocationLat(undefined);
     setLocationLng(undefined);
+    setLocationSource(value.trim() ? 'manual' : null);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!value.trim() || value.length < 2) { setSuggestions([]); return; }
@@ -94,8 +134,73 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
     setLocationText(s.display_name);
     setLocationLat(parseFloat(s.lat));
     setLocationLng(parseFloat(s.lon));
+    setLocationSource('autocomplete');
     setSuggestions([]);
   };
+
+  // Ask the browser for the user's current position. Used as fallback when
+  // the uploaded images carry no GPS metadata. Stored coords are blurred to
+  // ~1.1 km by the server (see Backend/routes/posts.ts).
+  const requestBrowserGeolocation = async (opts: { silentOnDeny?: boolean } = {}) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoPermissionState('unavailable');
+      return;
+    }
+    setIsResolvingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setLocationLat(latitude);
+        setLocationLng(longitude);
+        setLocationSource('geolocation');
+        setGeoPermissionState('prompted');
+        const label = await reverseGeocode(latitude, longitude);
+        if (label) setLocationText(label);
+        setIsResolvingLocation(false);
+      },
+      (err) => {
+        setIsResolvingLocation(false);
+        if (err.code === err.PERMISSION_DENIED) {
+          setGeoPermissionState('denied');
+          if (!opts.silentOnDeny) setError('Location permission denied — please type a location instead.');
+        } else {
+          setGeoPermissionState('unavailable');
+        }
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
+    );
+  };
+
+  // When images are added, try EXIF GPS first. If none, auto-prompt the
+  // browser for geolocation once per form session. Manual entry always wins
+  // if the user has already typed/selected something.
+  useEffect(() => {
+    if (imageFiles.length === 0) return;
+    if (locationLat != null && locationLng != null) return; // user already set one
+    let cancelled = false;
+    (async () => {
+      setIsResolvingLocation(true);
+      const gps = await extractGpsFromImages(imageFiles);
+      if (cancelled) return;
+      if (gps) {
+        setLocationLat(gps.lat);
+        setLocationLng(gps.lng);
+        setLocationSource('exif');
+        const label = await reverseGeocode(gps.lat, gps.lng);
+        if (!cancelled && label) setLocationText(label);
+        setIsResolvingLocation(false);
+        return;
+      }
+      setIsResolvingLocation(false);
+      // No EXIF GPS — auto-prompt browser geolocation once.
+      if (!autoGeoTriedRef.current && geoPermissionState === 'idle') {
+        autoGeoTriedRef.current = true;
+        await requestBrowserGeolocation({ silentOnDeny: true });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageFiles]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []) as File[];
@@ -248,9 +353,13 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
                     letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: 5 }}>
                     <MapPin size={11}/> Location (Optional)
                   </label>
-                  {locationLat != null && (
+                  {locationLat != null && locationSource && (
                     <span style={{ fontSize: 10, color: S.secondary, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <MapPin size={9}/> GPS set
+                      <MapPin size={9}/>
+                      {locationSource === 'exif'         && 'From photo'}
+                      {locationSource === 'geolocation'  && 'Device location'}
+                      {locationSource === 'autocomplete' && 'GPS set'}
+                      {locationSource === 'manual'       && 'GPS set'}
                     </span>
                   )}
                 </div>
@@ -273,12 +382,47 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
                   />
                   {/* Spinner or pin icon */}
                   <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: S.muted, pointerEvents: 'none' }}>
-                    {isSearching
+                    {(isSearching || isResolvingLocation)
                       ? <Loader2 size={14} className="animate-spin"/>
                       : <MapPin size={14}/>
                     }
                   </div>
                 </div>
+
+                {/* Geolocation fallback + privacy note */}
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => requestBrowserGeolocation()}
+                    disabled={isResolvingLocation || geoPermissionState === 'unavailable'}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '6px 10px', borderRadius: 8,
+                      border: `1px solid ${S.border}`, background: S.surf2,
+                      color: S.muted, fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
+                      cursor: (isResolvingLocation || geoPermissionState === 'unavailable') ? 'not-allowed' : 'pointer',
+                      opacity: (isResolvingLocation || geoPermissionState === 'unavailable') ? 0.6 : 1,
+                    }}
+                  >
+                    {isResolvingLocation
+                      ? <Loader2 size={11} className="animate-spin"/>
+                      : <Crosshair size={11}/>}
+                    {locationSource === 'geolocation' ? 'Refresh device location' : 'Use my current location'}
+                  </button>
+                  <span style={{ fontSize: 10, color: S.muted, fontWeight: 500 }}>
+                    Coords are blurred to ~1 km before publishing.
+                  </span>
+                </div>
+                {geoPermissionState === 'denied' && (
+                  <p style={{ marginTop: 6, fontSize: 10, color: S.muted }}>
+                    Location permission denied — type a place above instead.
+                  </p>
+                )}
+                {geoPermissionState === 'unavailable' && (
+                  <p style={{ marginTop: 6, fontSize: 10, color: S.muted }}>
+                    Geolocation isn’t available on this device — type a place above instead.
+                  </p>
+                )}
 
                 {/* Suggestions dropdown */}
                 {suggestions.length > 0 && (
