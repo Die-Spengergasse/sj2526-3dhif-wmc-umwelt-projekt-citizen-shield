@@ -256,6 +256,11 @@ export interface ApiModerationItem {
     description: string;
     type: PostType;
     imageUrl: string | null;
+    images: string[];
+    locationText: string | null;
+    locationLabel: string | null;
+    locationLat: number | null;
+    locationLng: number | null;
     createdAt: string;
     author: { displayName: string; avatarUrl: string | null };
     region: { slug: string; name: string };

@@ -15,7 +15,9 @@ moderationRouter.get('/', verifyToken, requireAdmin, async (req: AuthRequest, re
       `SELECT mq.id, mq.reason, mq.distance_m, mq.status, mq.moderator_note,
               mq.created_at, mq.reviewed_at,
               p.id           AS post_id,
-              p.title, p.description, p.type, p.image_url,
+              p.title, p.description, p.type, p.image_url, p.images,
+              p.location_text, p.location_label,
+              p.location_public_lat, p.location_public_lng,
               p.created_at   AS post_created_at,
               u.display_name AS author_name,
               u.avatar_url   AS author_avatar,
@@ -30,25 +32,35 @@ moderationRouter.get('/', verifyToken, requireAdmin, async (req: AuthRequest, re
        LIMIT 50`
     );
 
-    return res.json(result.rows.map(row => ({
-      id: row.id,
-      reason: row.reason,
-      distanceM: row.distance_m,
-      status: row.status,
-      moderatorNote: row.moderator_note,
-      createdAt: row.created_at,
-      reviewedAt: row.reviewed_at,
-      post: {
-        id: row.post_id,
-        title: row.title,
-        description: row.description,
-        type: row.type,
-        imageUrl: row.image_url,
-        createdAt: row.post_created_at,
-        author: { displayName: row.author_name, avatarUrl: row.author_avatar },
-        region: { slug: row.region_slug, name: row.region_name },
-      },
-    })));
+    return res.json(result.rows.map(row => {
+      const imagesArr = Array.isArray(row.images) && (row.images as string[]).length > 0
+        ? row.images as string[]
+        : row.image_url ? [row.image_url as string] : [];
+      return {
+        id: row.id,
+        reason: row.reason,
+        distanceM: row.distance_m,
+        status: row.status,
+        moderatorNote: row.moderator_note,
+        createdAt: row.created_at,
+        reviewedAt: row.reviewed_at,
+        post: {
+          id: row.post_id,
+          title: row.title,
+          description: row.description,
+          type: row.type,
+          imageUrl: row.image_url,
+          images: imagesArr,
+          locationText: row.location_text,
+          locationLabel: row.location_label,
+          locationLat: row.location_public_lat,
+          locationLng: row.location_public_lng,
+          createdAt: row.post_created_at,
+          author: { displayName: row.author_name, avatarUrl: row.author_avatar },
+          region: { slug: row.region_slug, name: row.region_name },
+        },
+      };
+    }));
   } catch (err) {
     console.error('GET /moderation error', err);
     return res.status(500).json({ error: 'Database error' });
