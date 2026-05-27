@@ -4,6 +4,7 @@ import { S } from '../design-tokens';
 import { Reveal, AmbientGlow } from '../motion';
 import { AppUser } from '../types';
 import { fetchModerationQueue, reviewPost, ApiModerationItem } from '../api';
+import { useRealtimeTopic } from '../context/RealtimeContext';
 
 interface ModerationViewProps {
   user: AppUser | null;
@@ -46,6 +47,9 @@ export const ModerationView: React.FC<ModerationViewProps> = ({ user, onSignIn }
   }, []);
 
   useEffect(() => { if (user) load(); else setLoading(false); }, [user, load]);
+
+  // Live updates: refresh the queue whenever a post is submitted or reviewed.
+  useRealtimeTopic(user?.isAdmin ? 'moderation' : null, () => { if (user) load(); });
 
   const openAction = (id: string, action: 'approve' | 'reject') => {
     setExpandedAction(prev => ({ ...prev, [id]: prev[id] === action ? null : action }));

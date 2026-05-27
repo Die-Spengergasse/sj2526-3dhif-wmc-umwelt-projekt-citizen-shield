@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db';
 import { verifyToken, requireAdmin, AuthRequest } from '../middleware/auth';
+import { emitPostCreated, emitModerationChanged, emitNotification } from '../events';
 
 export const moderationRouter = Router();
 
@@ -74,9 +75,10 @@ moderationRouter.post('/:id/review', verifyToken, requireAdmin, async (req: Auth
     const userId = userRes.rows[0].id;
 
     const queueRes = await client.query(
-      `SELECT mq.id, mq.post_id, p.author_id
+      `SELECT mq.id, mq.post_id, p.author_id, r.slug AS region_slug
        FROM moderation_queue mq
        JOIN posts p ON p.id = mq.post_id
+       JOIN regions r ON r.id = p.region_id
        WHERE mq.id = $1 AND mq.status = 'pending'`,
       [req.params.id]
     );
@@ -84,7 +86,7 @@ moderationRouter.post('/:id/review', verifyToken, requireAdmin, async (req: Auth
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Queue entry not found or already reviewed' });
     }
-    const { post_id: postId, author_id: authorId } = queueRes.rows[0];
+    const { post_id: postId, author_id: authorId, region_slug: regionSlug } = queueRes.rows[0];
     const newPostStatus = decision === 'approved' ? 'live' : 'rejected';
 
     await client.query(
@@ -110,6 +112,13 @@ moderationRouter.post('/:id/review', verifyToken, requireAdmin, async (req: Auth
     }
 
     await client.query('COMMIT');
+
+    // Fan out: moderation queue changed, possibly a new live post in the feed,
+    // and the author gets a notification.
+    emitModerationChanged(postId);
+    if (decision === 'approved') emitPostCreated(regionSlug, postId);
+    if (authorId) emitNotification(authorId);
+
     return res.json({ decision, postId, newPostStatus });
   } catch (err) {
     await client.query('ROLLBACK');

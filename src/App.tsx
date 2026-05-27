@@ -19,11 +19,13 @@ import {
   fetchNotifications, markNotificationRead, markAllNotificationsRead,
 } from './api';
 import { useAuth } from './context/AuthContext';
+import { useRealtimeTopic } from './context/RealtimeContext';
 import { S } from './design-tokens';
 import { Post, Region, PostType, Notification, AppUser, Voter } from './types';
 
 function AppContent() {
   const { firebaseUser, dbUser, signIn, signOut, refreshDbUser } = useAuth();
+  const dbUserId = dbUser?.id;
   const [location, setLocation] = useLocation();
 
   const user: AppUser | null = firebaseUser
@@ -144,6 +146,31 @@ function AppContent() {
     if (!user) { setNotifications([]); return; }
     fetchNotifications().then(setNotifications).catch(() => {});
   }, [user?.uid]);
+
+  // ── Realtime: keep the active region feed in sync. Any post/vote change in
+  // this region triggers a refetch of that region's slice.
+  useRealtimeTopic(
+    activeRegion ? `posts:${activeRegion.slug}` : null,
+    () => { if (activeRegion) loadPosts(activeRegion.slug); },
+  );
+
+  // ── Realtime: per-user channel for notifications & membership changes.
+  useRealtimeTopic(
+    dbUserId ? `user:${dbUserId}` : null,
+    (e) => {
+      if (e.type === 'notification:created') {
+        fetchNotifications().then(setNotifications).catch(() => {});
+        refreshDbUser();
+      } else if (e.type === 'region:membership_changed') {
+        fetchRegions()
+          .then(data => {
+            setRegions(data);
+            setJoinedRegions(data.filter(r => r.isJoined).map(r => r.slug));
+          })
+          .catch(() => {});
+      }
+    },
+  );
 
   const handleVote = (postId: string, voteType: 'upvote' | 'downvote') => {
     if (!user) { setSignInOpen(true); return; }

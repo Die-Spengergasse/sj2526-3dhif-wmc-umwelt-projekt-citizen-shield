@@ -8,8 +8,8 @@ Built with React + Vite (frontend), Express + PostgreSQL (backend), and Firebase
 
 | Layer      | Technology                                                   |
 |------------|--------------------------------------------------------------|
-| Frontend   | React 19, TypeScript, Vite, wouter (routing), inline CSS (warm editorial design) |
-| Backend    | Express.js, PostgreSQL, Firebase Admin SDK                   |
+| Frontend   | React 19, TypeScript, Vite, wouter (routing), inline CSS (warm editorial design), `exifr` (client-side GPS extraction) |
+| Backend    | Express.js, PostgreSQL, Firebase Admin SDK, `ws` (WebSocket server for realtime updates) |
 | Auth       | Firebase Authentication (Google OAuth)                       |
 | Storage    | Azure Blob Storage (image uploads)                           |
 | Dev Tools  | Vite, tsx                                                    |
@@ -107,7 +107,7 @@ npm run dev
 npm run server:dev
 ```
 
-The Vite dev server automatically proxies `/api/*` requests to the backend on port 3001.
+The Vite dev server automatically proxies both `/api/*` (HTTP) and `/ws` (WebSocket, used by the realtime sync layer) to the backend on port 3001.
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
@@ -152,6 +152,51 @@ Google OAuth will reject sign-in until the ngrok host is allowlisted:
 
 **Note:** the free ngrok plan gives you a new random subdomain on every restart, so you'll need to re-add it each session. To avoid this, claim a [static domain](https://dashboard.ngrok.com/domains) (free tier includes one) and start with `ngrok http --url=your-static-name.ngrok-free.app 3000` — then you only authorise it in Firebase once.
 
+## Permanent Free Hosting (no laptop required)
+
+ngrok only works while your machine is on. For a truly always-on permanent URL, deploy each piece to a free host. All three providers below have WebSocket support, which is required for the realtime layer (`/ws`).
+
+| Piece               | Provider          | Free tier                                    | Permanent URL                    |
+|---------------------|-------------------|----------------------------------------------|----------------------------------|
+| Frontend (static)   | Vercel / Netlify  | Unlimited static deploys                     | `yourapp.vercel.app`             |
+| Backend (Express)   | Render / Fly.io   | 750 hrs/mo (Render Web Service, free)        | `yourapp-api.onrender.com`       |
+| PostgreSQL          | Neon              | 0.5 GB storage, always-on                    | `ep-foo.neon.tech`               |
+
+### 1. Move Postgres to Neon
+
+1. Sign up at [neon.tech](https://neon.tech) → create a project → copy the connection string.
+2. Apply the schema once: `psql "postgresql://...neon.tech/citizen_shield?sslmode=require" -f Backend/000_citizen_shield_complete.sql`.
+3. Update your local `.env` (and later the Render env vars) with the new `DATABASE_URL`.
+
+### 2. Deploy the backend to Render
+
+1. Push this repo to GitHub.
+2. [Render dashboard](https://dashboard.render.com/) → **New +** → **Web Service** → connect the repo.
+3. Settings:
+   - **Build Command:** `npm install`
+   - **Start Command:** `npx tsx Backend/server.ts`
+   - **Environment:** add every variable from your `.env` (`DATABASE_URL`, `FIREBASE_*`, `AZURE_*`, `APP_URL`).
+   - Set `APP_URL` to your future frontend URL (e.g. `https://yourapp.vercel.app`) — this is the CORS allow-origin.
+4. Render will give you `https://yourapp-api.onrender.com`. WebSocket frames work on the same host at `/ws` automatically (Render upgrades HTTP to WS on Web Services).
+
+### 3. Deploy the frontend to Vercel
+
+Vercel doesn't run the Vite dev-server proxy, so the frontend has to hit the backend by absolute URL. Add an env-var-driven base URL:
+
+1. In `src/api.ts`, replace the hard-coded `/api/...` paths with `${import.meta.env.VITE_API_BASE ?? ''}/api/...`. Do the same for the WebSocket URL in `src/realtime.ts` — when `VITE_API_BASE` is set, build the WS URL from it (`https://...` → `wss://...`).
+2. Push, then on [vercel.com](https://vercel.com): **Add New Project** → import the repo.
+3. Framework preset: **Vite**. Build command and output dir are auto-detected.
+4. Set the env var `VITE_API_BASE = https://yourapp-api.onrender.com` in **Project Settings → Environment Variables**.
+5. Deploy. You get `https://yourapp.vercel.app`.
+
+### 4. Wire it together
+
+1. Update Render's `APP_URL` to the final Vercel URL (CORS).
+2. [Firebase Console](https://console.firebase.google.com/) → **Authentication → Settings → Authorized domains** → add `yourapp.vercel.app`.
+3. Open `https://yourapp.vercel.app`. Sign-in, posts, votes, comments, moderation, and the WebSocket-driven live updates should all work without your laptop running.
+
+**Note on Render's free tier:** the service sleeps after ~15 min of inactivity and takes ~30 s to wake on the first request. For a class demo or a 24/7 deployment, upgrade to a paid plan or switch to Fly.io's "always-on" small VM (also free for tiny workloads).
+
 ## Available Scripts
 
 | Command              | Description                                     |
@@ -170,29 +215,33 @@ Google OAuth will reject sign-in until the ngrok host is allowlisted:
 ├── Backend/
 │   ├── 000_citizen_shield_complete.sql            # One-shot: creates DB, role, permissions, extensions, schema (incl. notifications), seed data
 │   ├── db.ts                                      # PostgreSQL connection pool
-│   ├── server.ts                                  # Express app entrypoint
+│   ├── server.ts                                  # Express app entrypoint — also creates the HTTP server that the WebSocket server attaches to
+│   ├── ws.ts                                      # WebSocket server (/ws) — Firebase-auth on connect, topic subscriptions, heartbeat
+│   ├── events.ts                                  # Typed emitters routes call after writes (post:created, vote:changed, comment:created, notification:created, …)
 │   ├── middleware/
 │   │   └── auth.ts                                # Firebase token verification + requireAdmin middleware
 │   └── routes/
 │       ├── auth.ts                                # POST /api/auth/sync, GET /api/auth/me
-│       ├── regions.ts                             # GET /api/regions, GET /api/regions/:slug, POST /api/regions/:slug/join
-│       ├── posts.ts                               # CRUD for community posts
-│       ├── votes.ts                               # POST/GET /api/posts/:id/vote
-│       ├── comments.ts                            # GET/POST /api/posts/:id/comments
-│       ├── moderation.ts                          # GET /api/moderation, POST /api/moderation/:id/review (sends notification to author)
+│       ├── regions.ts                             # GET /api/regions, GET /api/regions/:slug, POST /api/regions/:slug/join (emits region:membership_changed)
+│       ├── posts.ts                               # CRUD for community posts (emits moderation:changed on submit, post:deleted on delete)
+│       ├── votes.ts                               # POST/GET /api/posts/:id/vote (emits vote:changed)
+│       ├── comments.ts                            # GET/POST /api/posts/:id/comments (emits comment:created)
+│       ├── moderation.ts                          # GET /api/moderation, POST /api/moderation/:id/review (emits moderation:changed, post:created on approve, notification:created)
 │       ├── notifications.ts                       # GET /api/notifications, POST /api/notifications/:id/read, POST /api/notifications/read-all
 │       └── upload.ts                              # POST /api/upload/image (Azure Blob)
 ├── src/
-│   ├── main.tsx                                   # App entrypoint with AuthProvider
-│   ├── App.tsx                                    # Root component — wouter Router, real auth, view routing
+│   ├── main.tsx                                   # App entrypoint with AuthProvider + RealtimeProvider
+│   ├── App.tsx                                    # Root component — wouter Router, real auth, view routing, subscribes to posts:<slug> + user:<id> realtime topics
 │   ├── api.ts                                     # Authenticated fetch helper + API wrappers
 │   ├── firebase.ts                                # Firebase client SDK init (Auth only)
+│   ├── realtime.ts                                # WebSocket client — module-level singleton, auto-reconnect with backoff, topic re-subscribe on reconnect, reauth() for sign-in/out
 │   ├── types.ts                                   # TypeScript interfaces (Post, Region, AppUser …)
 │   ├── design-tokens.ts                           # S palette, INTENSITY, REGION_COORDS
 │   ├── motion.tsx                                 # Reveal, CountUp, Skeleton, Toaster, LiveDot …
-│   ├── index.css                                  # Global CSS + keyframe animations
+│   ├── index.css                                  # Global CSS + keyframe animations (incl. hidden-scrollbar overflow for the squircle nav pills)
 │   ├── context/
-│   │   └── AuthContext.tsx                        # Global auth state (Firebase + backend sync)
+│   │   ├── AuthContext.tsx                        # Global auth state (Firebase + backend sync)
+│   │   └── RealtimeContext.tsx                    # WebSocket provider + useRealtimeTopic(topic, handler) hook
 │   ├── components/
 │   │   ├── Wordmark.tsx                           # Shield logo + logotype
 │   │   ├── TopNav.tsx                             # Top navigation with notifications + auth UI (wouter)
@@ -229,6 +278,7 @@ Google OAuth will reject sign-in until the ngrok host is allowlisted:
 - **Notifications** — Per-user notification feed for post approval/rejection; endpoints to fetch, mark single read, mark all read
 - **Distance-based moderation** — Posts whose user-supplied GPS is more than 5 km from the region center are auto-flagged as `pending_review` and inserted into `moderation_queue` (uses the `earthdistance` extension and the seeded `regions.center_lat` / `center_lng`)
 - **Image upload** — Multipart upload to Azure Blob Storage with file type validation (JPEG, PNG, WebP) and 10 MB limit; images are run through `sharp` to apply EXIF orientation and strip all metadata (incl. GPS) before upload
+- **Realtime WebSocket layer** — `ws` server mounted at `/ws` on the same HTTP server as Express; Firebase ID-token auth on connect; topic-based subscriptions: `posts:<regionSlug>`, `post:<postId>`, `user:<dbUserId>`, `moderation`; per-topic permission check (admins for `moderation`, self-only for `user:*`, public for post/region topics); 30-second heartbeat drops dead clients; routes emit events through `Backend/events.ts` after every write so subscribed clients refetch the affected slice
 - **Database** — Full PostgreSQL schema with enums, foreign keys, indexes, triggers for `updated_at` and vote count sync, audit trail for verification badges, `notifications` table
 
 ### Frontend (React)
@@ -243,6 +293,9 @@ Google OAuth will reject sign-in until the ngrok host is allowlisted:
 - **Moderation UI** — Inline reason textarea for reject (required), optional note for approve; decision sent to API which notifies the post author
 - **Admin-only Moderation Tab** — `/moderation` route and the Review nav item are only visible to the 4 team email addresses (`user.isAdmin` guard in `TopNav`, `BottomNav`, and `ModerationView`)
 - **Real notifications** — Bell dropdown fetches from `/api/notifications`; mark-read per item or all; unread count badge; relative timestamps via `useNow`
+- **Realtime sync over WebSocket** — `src/realtime.ts` is a module-level singleton so it's alive before any React effect runs (fixing the timing bug where early subscriptions silently no-op'd). `RealtimeContext` exposes `useRealtimeTopic(topic, handler)`. App.tsx subscribes to `posts:<activeRegion.slug>` (refetches the feed on any event) and `user:<dbUserId>` (refetches notifications + region membership). PostDetailView subscribes to `post:<id>` (live comments + vote-count updates). ModerationView subscribes to `moderation` (admins only). Auto-reconnect with exponential backoff, re-authenticates and re-subscribes after reconnect, outbox queues frames during reconnect, `client.reauth()` is called on sign-in/out without tearing down the socket.
+- **Image location capture** — `PostForm` reads GPS from uploaded photos client-side using `exifr` before they're sent to the backend (the server strips EXIF on upload, so this has to happen in the browser). If no image has GPS, the form auto-prompts `navigator.geolocation.getCurrentPosition()` once per session (silent on denial) and shows a `Use my current location` button as a manual retry. Falls back to the manual Nominatim autocomplete. A source badge shows "From photo" / "Device location" / "GPS set". Coords are blurred to ~1 km by the backend before publishing (`Backend/routes/posts.ts:184-185`).
+- **Squircle nav overflow** — both the desktop top-nav pill and the mobile bottom nav scroll horizontally inside their rounded container instead of poking out; the scrollbar is hidden cross-browser (`scrollbar-width: none` + `::-webkit-scrollbar { display: none }`).
 - **Community/Chat removed** — `CommunityView`, `Chat`, and Firebase Firestore are no longer part of the app
 - **Responsive layout** — Desktop top nav, mobile bottom nav (extra Review tab when the signed-in user is an admin)
 - **Inline CSS** — All components use `style={{}}` props; only utility CSS classes come from `index.css`
@@ -251,7 +304,7 @@ Google OAuth will reject sign-in until the ngrok host is allowlisted:
 
 ### Next up (highest priority)
 
-- [ ] **Geolocation capture in `PostForm`** — call `navigator.geolocation.getCurrentPosition` and pass `locationLat` / `locationLng` to `POST /api/posts`. **This is the missing piece that makes the existing distance-based moderation actually fire** — without GPS from the client, every post still goes live.
+- [ ] **Tests for the realtime layer** — none of the WebSocket flow is covered yet; add an integration test that asserts vote/comment/moderation events propagate to a second client.
 
 ### Frontend — New Features
 
@@ -274,6 +327,9 @@ Google OAuth will reject sign-in until the ngrok host is allowlisted:
 
 ### Recently completed
 
+- [x] **Realtime WebSocket sync** — `Backend/ws.ts` + `Backend/events.ts` server-side, `src/realtime.ts` + `src/context/RealtimeContext.tsx` client-side; feed, votes, comments, moderation queue, and notifications all propagate live without polling. Singleton client + `reauth()` so subscriptions made during initial render actually register.
+- [x] **Image location capture** — `exifr`-based EXIF GPS extraction in `PostForm` with a one-time geolocation auto-prompt + manual button as fallback; replaces the previous "no GPS ever sent from client" gap that made distance-based moderation a no-op.
+- [x] **Squircle nav overflow** — `cs-topnav-items` and `cs-nav-mobile` now scroll horizontally with a hidden scrollbar instead of letting items poke out of the rounded container.
 - [x] **Admin role system** — 4 hardcoded team emails, auto-set on login via `auth/sync`, enforced by `requireAdmin` middleware
 - [x] **Notifications system** — `post_approved` / `post_rejected` notifications with bell UI
 - [x] **PostDetailView overlay** — Twitter/X-style detail view with comments

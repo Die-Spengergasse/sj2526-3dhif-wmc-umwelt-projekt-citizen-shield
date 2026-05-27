@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db';
 import { verifyToken, optionalToken, AuthRequest } from '../middleware/auth';
+import { emitModerationChanged, emitPostDeleted } from '../events';
 
 export const postsRouter = Router();
 
@@ -236,6 +237,8 @@ postsRouter.post('/', verifyToken, async (req: AuthRequest, res) => {
     }
 
     await client.query('COMMIT');
+    // New post starts in moderation queue — notify moderators.
+    emitModerationChanged(postId);
     return res.status(201).json({ id: postId, status: postStatus, distanceM });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -267,7 +270,11 @@ postsRouter.delete('/:id', verifyToken, async (req: AuthRequest, res) => {
       if (!modRes.rows[0]) return res.status(403).json({ error: 'Not authorized to delete this post' });
     }
 
+    const slugRes = await pool.query('SELECT slug FROM regions WHERE id = $1', [regionId]);
+    const regionSlug: string | undefined = slugRes.rows[0]?.slug;
+
     await pool.query('DELETE FROM posts WHERE id = $1', [req.params.id]);
+    if (regionSlug) emitPostDeleted(regionSlug, req.params.id);
     return res.json({ deleted: true });
   } catch (err) {
     console.error('DELETE /posts/:id error', err);

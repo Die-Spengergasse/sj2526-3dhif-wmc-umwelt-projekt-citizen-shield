@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db';
 import { verifyToken, optionalToken, AuthRequest } from '../middleware/auth';
+import { emitCommentCreated } from '../events';
 
 export const commentsRouter = Router();
 
@@ -58,6 +59,7 @@ commentsRouter.post('/:id/comments', verifyToken, async (req: AuthRequest, res) 
     );
 
     const row = result.rows[0];
+    emitCommentCreated(req.params.id);
     return res.status(201).json({
       id: row.id,
       userId: user.id,

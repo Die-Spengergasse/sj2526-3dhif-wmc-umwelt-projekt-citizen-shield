@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import { authRouter } from './routes/auth';
 import { regionsRouter } from './routes/regions';
@@ -9,6 +10,7 @@ import { commentsRouter } from './routes/comments';
 import { moderationRouter } from './routes/moderation';
 import { notificationsRouter } from './routes/notifications';
 import { uploadRouter } from './routes/upload';
+import { initWebSocketServer } from './ws';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -30,6 +32,9 @@ app.use('/api/upload',        uploadRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+initWebSocketServer(server);
+
+server.listen(PORT, () => {
   console.log(`Citizen Shield API listening on port ${PORT}`);
 });

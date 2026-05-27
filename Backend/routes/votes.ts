@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/auth';
+import { emitVoteChanged } from '../events';
 
 export const votesRouter = Router();
 
@@ -24,11 +25,17 @@ votesRouter.post('/:id/vote', verifyToken, async (req: AuthRequest, res) => {
     }
     const userId = userRes.rows[0].id;
 
-    const postRes = await client.query('SELECT id FROM posts WHERE id = $1', [req.params.id]);
+    const postRes = await client.query(
+      `SELECT p.id, r.slug AS region_slug
+       FROM posts p JOIN regions r ON r.id = p.region_id
+       WHERE p.id = $1`,
+      [req.params.id]
+    );
     if (!postRes.rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Post not found' });
     }
+    const regionSlug: string = postRes.rows[0].region_slug;
 
     if (voteType === null) {
       await client.query(
@@ -51,6 +58,7 @@ votesRouter.post('/:id/vote', verifyToken, async (req: AuthRequest, res) => {
     );
 
     await client.query('COMMIT');
+    emitVoteChanged(regionSlug, req.params.id);
     return res.json({
       upvoteCount: updated.rows[0].upvote_count,
       downvoteCount: updated.rows[0].downvote_count,

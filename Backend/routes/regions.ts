@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db';
 import { verifyToken, optionalToken, AuthRequest } from '../middleware/auth';
+import { emitMembershipChanged } from '../events';
 
 export const regionsRouter = Router();
 
@@ -97,6 +98,7 @@ regionsRouter.post('/:slug/join', verifyToken, async (req: AuthRequest, res) => 
        ON CONFLICT (user_id, region_id) DO NOTHING`,
       [userId, regionId]
     );
+    emitMembershipChanged(userId, req.params.slug, true);
     return res.json({ joined: true });
   } catch (err) {
     console.error('POST /regions/:slug/join error', err);
@@ -119,6 +121,7 @@ regionsRouter.delete('/:slug/join', verifyToken, async (req: AuthRequest, res) =
       'DELETE FROM user_regions WHERE user_id = $1 AND region_id = $2',
       [userId, regionId]
     );
+    emitMembershipChanged(userId, req.params.slug, false);
     return res.json({ left: true });
   } catch (err) {
     console.error('DELETE /regions/:slug/join error', err);

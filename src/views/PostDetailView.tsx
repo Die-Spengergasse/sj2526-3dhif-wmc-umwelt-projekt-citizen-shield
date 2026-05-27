@@ -18,6 +18,7 @@ import { S } from '../design-tokens';
 import { TimelineItem } from '../components/TimelineItem';
 import { Post, Comment, AppUser } from '../types';
 import { fetchPost, fetchComments, createComment } from '../api';
+import { useRealtimeTopic } from '../context/RealtimeContext';
 
 interface PostDetailViewProps {
   postId: string;
@@ -81,6 +82,17 @@ export const PostDetailView: React.FC<PostDetailViewProps> = ({
       .catch(() => {})
       .finally(() => setLoadingComments(false));
   }, [postId]);
+
+  // Live updates: new comments appended, vote counts refreshed, post deletes reflected.
+  useRealtimeTopic(`post:${postId}`, (e) => {
+    if (e.type === 'comment:created') {
+      fetchComments(postId).then(setComments).catch(() => {});
+    } else if (e.type === 'vote:changed' || e.type === 'post:updated') {
+      fetchPost(postId).then(setPost).catch(() => {});
+    } else if (e.type === 'post:deleted') {
+      setPost(null);
+    }
+  });
 
   const handleSubmitComment = async (e: React.FormEvent | React.KeyboardEvent) => {
     e.preventDefault();
