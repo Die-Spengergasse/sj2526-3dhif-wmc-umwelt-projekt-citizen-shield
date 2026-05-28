@@ -19,6 +19,16 @@ interface RealtimeClient {
 }
 
 function wsUrl(): string {
+  // In production VITE_API_BASE points to the backend on a different origin
+  // (e.g. https://citizen-shield-api.onrender.com). We have to derive the WS
+  // URL from it, because the frontend host (Vercel) doesn't run our /ws
+  // server. In dev the var is empty and we fall back to the current host so
+  // the Vite proxy can route /ws to the local Express server.
+  const base = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
+  if (base) {
+    const wsBase = base.replace(/^http/, 'ws'); // http -> ws, https -> wss
+    return `${wsBase}/ws`;
+  }
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${scheme}://${window.location.host}/ws`;
 }

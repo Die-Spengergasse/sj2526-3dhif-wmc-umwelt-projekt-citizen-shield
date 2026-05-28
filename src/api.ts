@@ -1,6 +1,11 @@
 import { auth } from './firebase';
 import { Region, Post, PostType, Comment, Notification } from './types';
 
+// In production (Vercel) the backend lives on a different origin (Render), so
+// every request needs an absolute URL. In dev VITE_API_BASE is empty and the
+// Vite proxy in vite.config.ts rewrites /api/* to the local Express server.
+export const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
+
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -13,7 +18,7 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -31,7 +36,7 @@ export async function apiUpload(file: File): Promise<string> {
   const form = new FormData();
   form.append('image', file);
 
-  const res = await fetch('/api/upload/image', {
+  const res = await fetch(`${API_BASE}/api/upload/image`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}` },
     body: form,
