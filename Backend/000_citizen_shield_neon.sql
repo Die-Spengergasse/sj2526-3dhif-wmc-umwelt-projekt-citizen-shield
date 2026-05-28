@@ -1,0 +1,721 @@
+-- ============================================================
+-- CITIZEN SHIELD – Neon-compatible DB setup
+-- ------------------------------------------------------------
+-- This is a slim variant of 000_citizen_shield_complete.sql for
+-- managed Postgres hosts (Neon, Supabase, RDS …) where you don't
+-- get to create new top-level databases or roles.
+--
+-- Differences vs the self-hosted script:
+--   - Skips section 1   (CREATE ROLE citizen_shield_user, CREATE DATABASE)
+--   - Skips section 3   (GRANT ALL … TO citizen_shield_user — unnecessary,
+--                        the connecting role already owns the schema)
+--   - Skips \connect    (we stay in whichever DB the connection string targets)
+--
+-- Sections 2 (extensions) + 4–10 (enums, tables, indexes, triggers, seed) are
+-- byte-for-byte identical to the full script — keep them in sync if you edit
+-- one of them.
+--
+-- Usage:
+--   psql "$DATABASE_URL" -f Backend/000_citizen_shield_neon.sql
+--
+-- Re-runs are safe: every CREATE uses IF NOT EXISTS / ON CONFLICT DO NOTHING.
+-- ============================================================
+
+\set ON_ERROR_STOP on
+
+
+-- ============================================================
+-- 2. EXTENSIONS
+-- ============================================================
+-- cube is a hard dependency of earthdistance. On older self-hosted Postgres
+-- "earthdistance CASCADE" pulled it in automatically; on Neon we install it
+-- explicitly first because some projects don't allow CASCADE to create
+-- extensions on the fly.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS cube;
+CREATE EXTENSION IF NOT EXISTS earthdistance;
+
+
+-- ============================================================
+-- 4. ENUMS
+-- Typsichere Werte für Status-Felder
+-- ============================================================
+
+DO $$ BEGIN
+  CREATE TYPE region_intensity      AS ENUM ('CRITICAL', 'HIGH', 'ALERT', 'STABLE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE user_role_in_region   AS ENUM ('member', 'moderator', 'hub_coordinator');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE post_type             AS ENUM ('critical', 'info', 'broadcast');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE post_status           AS ENUM ('live', 'pending_review', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE location_status       AS ENUM ('verified', 'unverified', 'none', 'pending_review');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE location_source       AS ENUM ('exif', 'manual', 'geocoded');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE vote_type             AS ENUM ('upvote', 'downvote');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE moderation_reason     AS ENUM ('distance_exceeded', 'flagged', 'manual');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE moderation_status     AS ENUM ('pending', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE verification_action   AS ENUM ('granted', 'revoked');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE notification_type AS ENUM ('post_approved', 'post_rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+
+-- ============================================================
+-- 5. TABELLEN OHNE FOREIGN KEYS
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 5a. TABELLE: users
+-- Zentrale Identitätstabelle – verknüpft mit Google Auth
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS users (
+  id                      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  google_uid              TEXT          NOT NULL UNIQUE,        -- Firebase Auth UID
+  email                   TEXT          NOT NULL UNIQUE,
+  display_name            TEXT          NOT NULL,
+  avatar_url              TEXT,
+
+  -- Verifikations-Badge
+  is_verified             BOOLEAN       NOT NULL DEFAULT FALSE,
+  is_admin                BOOLEAN       NOT NULL DEFAULT FALSE,
+  verified_at             TIMESTAMPTZ,
+  verified_revoked_at     TIMESTAMPTZ,
+  verified_revoke_reason  TEXT,
+
+  created_at              TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  last_active_at          TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE  users                        IS 'Alle registrierten User. Authentifizierung via Google OAuth / Firebase.';
+COMMENT ON COLUMN users.google_uid             IS 'Firebase Auth UID – wird beim Login zur Identifikation verwendet.';
+COMMENT ON COLUMN users.is_verified            IS 'Blaues Häkchen: einmalig vergeben, kann nur durch Admin entzogen werden.';
+COMMENT ON COLUMN users.is_admin               IS 'TRUE für die 4 Projekt-Teammitglieder. Wird beim Login automatisch gesetzt wenn die E-Mail in der Admin-Liste steht.';
+COMMENT ON COLUMN users.verified_revoke_reason IS 'Pflichtfeld wenn is_verified auf FALSE gesetzt wird.';
+
+
+-- ------------------------------------------------------------
+-- 5b. TABELLE: regions
+-- Krisenregionen – dynamische Status-Felder werden vom Backend aktualisiert
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS regions (
+  id                UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug              TEXT              NOT NULL UNIQUE,
+  name              TEXT              NOT NULL,
+  intensity         region_intensity  NOT NULL DEFAULT 'STABLE',
+  active_hubs       INT               NOT NULL DEFAULT 0,
+  connectivity      INT               NOT NULL DEFAULT 0 CHECK (connectivity BETWEEN 0 AND 100),
+  description       TEXT,
+  image_url         TEXT,
+  map_image_url     TEXT,
+  emergency_contact TEXT,
+  center_lat        DOUBLE PRECISION,
+  center_lng        DOUBLE PRECISION,
+  updated_at        TIMESTAMPTZ       NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE  regions              IS 'Aktive Krisenregionen. intensity, active_hubs und connectivity werden vom Backend laufend aktualisiert.';
+COMMENT ON COLUMN regions.slug         IS 'URL-freundlicher Identifier – wird als Firestore Collection-Key für region_status verwendet.';
+COMMENT ON COLUMN regions.connectivity IS 'Prozentsatz 0–100. Wird auch in Firestore region_status gespiegelt für Live-Updates.';
+COMMENT ON COLUMN regions.center_lat   IS 'Geographisches Zentrum (typischerweise Hauptstadt). Wird für Distanz-basierte Moderation verwendet.';
+
+
+-- ============================================================
+-- 6. TABELLEN MIT FOREIGN KEYS (Dependency-Reihenfolge)
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 6a. TABELLE: user_verification_stats
+-- Cached Stats für Badge-Berechnung – 1:1 zu users
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS user_verification_stats (
+  user_id                   UUID    PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  total_posts               INT     NOT NULL DEFAULT 0,
+  qualifying_posts          INT     NOT NULL DEFAULT 0,   -- Posts mit ≥90% Upvotes bei ≥50 Stimmen
+  total_upvotes_received    INT     NOT NULL DEFAULT 0,
+  total_downvotes_received  INT     NOT NULL DEFAULT 0,
+  last_calculated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE  user_verification_stats                  IS 'Aggregierte Stats pro User für Badge-Berechnung. Wird asynchron aktualisiert.';
+COMMENT ON COLUMN user_verification_stats.qualifying_posts IS 'Anzahl Posts die die Schwelle erfüllen: ≥90% Upvotes bei ≥50 Gesamtstimmen. Badge wird vergeben ab qualifying_posts >= 10.';
+
+
+-- ------------------------------------------------------------
+-- 6b. TABELLE: verification_log
+-- Audit Trail für jeden Badge-Entzug oder -Vergabe durch Admin
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS verification_log (
+  id          UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID                NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  admin_id    UUID                NOT NULL REFERENCES users(id),
+  action      verification_action NOT NULL,
+  reason      TEXT,
+  created_at  TIMESTAMPTZ         NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE verification_log IS 'Vollständige History aller Badge-Vergaben und Entziehungen durch Admins.';
+
+
+-- ------------------------------------------------------------
+-- 6c. TABELLE: region_safe_zones
+-- Verifizierte sichere Treffpunkte pro Region
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS region_safe_zones (
+  id          UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
+  region_id   UUID  NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
+  name        TEXT  NOT NULL,
+  description TEXT,
+  CONSTRAINT uq_safe_zone_region_name UNIQUE (region_id, name)
+);
+
+COMMENT ON TABLE region_safe_zones IS 'Verifizierte Safe Zones pro Region. Erweiterbar mit GPS-Koordinaten für Kartenansicht.';
+
+
+-- ------------------------------------------------------------
+-- 6d. TABELLE: region_resources
+-- Lokale Ressourcen (Medizin, Rechtsberatung, etc.)
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS region_resources (
+  id          UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
+  region_id   UUID  NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
+  title       TEXT  NOT NULL,
+  category    TEXT  NOT NULL,   -- z.B. 'Medical', 'Legal', 'Comms'
+  location    TEXT,
+  CONSTRAINT uq_resource_region_title UNIQUE (region_id, title)
+);
+
+COMMENT ON TABLE region_resources IS 'Lokale Ressourcen pro Region. category ermöglicht Filterung im Safety Hub.';
+
+
+-- ------------------------------------------------------------
+-- 6e. TABELLE: user_regions
+-- M:N Verbindung User ↔ Region mit Rolle
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS user_regions (
+  id          UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID                NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  region_id   UUID                NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
+  role        user_role_in_region NOT NULL DEFAULT 'member',
+  joined_at   TIMESTAMPTZ         NOT NULL DEFAULT now(),
+
+  UNIQUE (user_id, region_id)
+);
+
+COMMENT ON TABLE  user_regions      IS 'Zugehörigkeit eines Users zu einer Region. Ein User kann mehreren Regionen angehören.';
+COMMENT ON COLUMN user_regions.role IS 'member = normaler User, moderator = kann Posts reviewen, hub_coordinator = kann Region-Status aktualisieren.';
+
+
+-- ------------------------------------------------------------
+-- 6f. TABELLE: posts
+-- Community-Reports – werden sofort gepostet (außer bei Distanz-Anomalie)
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS posts (
+  id                    UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
+  region_id             UUID              NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
+  author_id             UUID              NOT NULL REFERENCES users(id),
+
+  -- Inhalt
+  title                 TEXT              NOT NULL CHECK (char_length(title) BETWEEN 5 AND 200),
+  description           TEXT              NOT NULL CHECK (char_length(description) BETWEEN 10 AND 2000),
+  type                  post_type         NOT NULL DEFAULT 'info',
+  image_url             TEXT,
+  images                TEXT[]            DEFAULT '{}',
+
+  -- Voting (denormalisiert für Performance)
+  upvote_count          INT               NOT NULL DEFAULT 0,
+  downvote_count        INT               NOT NULL DEFAULT 0,
+
+  -- Status
+  post_status           post_status       NOT NULL DEFAULT 'live',
+  moderation_note       TEXT,
+
+  -- Location – intern (niemals an Client übergeben)
+  location_lat          DOUBLE PRECISION,
+  location_lng          DOUBLE PRECISION,
+  location_source       location_source,
+  location_distance_m   INT,
+
+  -- Location – öffentlich (~1km gerundet)
+  location_public_lat   DOUBLE PRECISION,
+  location_public_lng   DOUBLE PRECISION,
+  location_label        TEXT,
+  location_status       location_status   NOT NULL DEFAULT 'none',
+  location_text         VARCHAR(255),
+
+  created_at            TIMESTAMPTZ       NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ       NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE  posts                     IS 'Community-Reports. Werden sofort veröffentlicht außer bei Distanz-Anomalie (>5km).';
+COMMENT ON COLUMN posts.image_url           IS 'Azure Blob URL. EXIF wurde serverseitig gestrippt bevor Upload. Original-Bild wird sofort gelöscht.';
+COMMENT ON COLUMN posts.images              IS 'Array of Azure Blob URLs für Multi-Image Posts. EXIF serverseitig gestrippt.';
+COMMENT ON COLUMN posts.upvote_count        IS 'Denormalisierter Zähler – wird bei jedem Vote inkrementiert. Echte Daten in post_votes.';
+COMMENT ON COLUMN posts.location_lat        IS 'Exakte Koordinaten – NIEMALS in API-Responses an Client übergeben.';
+COMMENT ON COLUMN posts.location_public_lat IS 'Auf 2 Dezimalstellen gerundet (~1.1km Unschärfe) – safe für öffentliche Kartenanzeige.';
+COMMENT ON COLUMN posts.location_distance_m IS 'Berechnete Distanz beim Upload. >5000m → pending_review.';
+COMMENT ON COLUMN posts.location_text       IS 'Manuelle Standort-Beschreibung z.B. "Kathmandu, Thamel District". Alternative zu GPS-Koordinaten.';
+
+
+-- ------------------------------------------------------------
+-- 6g. TABELLE: post_tags
+-- Tags als eigene Tabelle für Querybarkeit
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS post_tags (
+  id        UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id   UUID  NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  tag       TEXT  NOT NULL CHECK (char_length(tag) BETWEEN 1 AND 50),
+
+  UNIQUE (post_id, tag)
+);
+
+COMMENT ON TABLE post_tags IS 'Tags als separate Zeilen – ermöglicht Filterung wie "alle Posts mit Tag MeshNet in Myanmar".';
+
+
+-- ------------------------------------------------------------
+-- 6h. TABELLE: post_votes
+-- Öffentliche Votes – jeder sieht wer wie gevoted hat
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS post_votes (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id     UUID        NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  voter_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  vote_type   vote_type   NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (post_id, voter_id)
+);
+
+COMMENT ON TABLE  post_votes           IS 'Vollständig öffentliche Votes. UNIQUE auf (post_id, voter_id) verhindert Mehrfachvoting.';
+COMMENT ON COLUMN post_votes.vote_type IS 'upvote oder downvote. Ändern via UPDATE (nicht DELETE + INSERT) um created_at zu erhalten.';
+
+
+-- ------------------------------------------------------------
+-- 6i. TABELLE: moderation_queue
+-- Posts die >5km vom angegebenen Ort entfernt erstellt wurden
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS moderation_queue (
+  id              UUID                  PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id         UUID                  NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  moderator_id    UUID                  REFERENCES users(id),
+  reason          moderation_reason     NOT NULL DEFAULT 'distance_exceeded',
+  distance_m      INT,
+  status          moderation_status     NOT NULL DEFAULT 'pending',
+  moderator_note  TEXT,
+  created_at      TIMESTAMPTZ           NOT NULL DEFAULT now(),
+  reviewed_at     TIMESTAMPTZ
+);
+
+COMMENT ON TABLE  moderation_queue              IS 'Review-Queue für Posts mit Distanz-Anomalie oder manuell geflaggten Posts.';
+COMMENT ON COLUMN moderation_queue.moderator_id IS 'NULL = noch nicht zugewiesen. Wird gesetzt wenn ein Moderator den Case übernimmt.';
+COMMENT ON COLUMN moderation_queue.distance_m   IS 'Distanz in Metern zwischen User-GPS und angegebenem Ort beim Upload.';
+
+
+-- ------------------------------------------------------------
+-- 6j. TABELLE: pinned_posts
+-- Pro-User gepinnte Posts pro Region
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS pinned_posts (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  post_id     UUID        NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  region_slug TEXT        NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (user_id, post_id)
+);
+
+COMMENT ON TABLE pinned_posts IS 'Persistente, user-spezifische Pins auf Posts. region_slug ermöglicht schnelles Filtern pro Region.';
+
+
+-- ------------------------------------------------------------
+-- 6k. TABELLE: post_comments
+-- Kommentare auf Posts
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS post_comments (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id    UUID        NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  text       TEXT        NOT NULL CHECK (char_length(text) BETWEEN 1 AND 1000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE post_comments IS 'Kommentare auf Posts. Ein Post kann beliebig viele Kommentare haben.';
+
+
+-- ------------------------------------------------------------
+-- 6l. TABELLE: notifications
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id         UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID              NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  post_id    UUID              REFERENCES posts(id) ON DELETE SET NULL,
+  type       notification_type NOT NULL,
+  reason     TEXT,
+  read       BOOLEAN           NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ       NOT NULL DEFAULT now()
+);
+
+
+-- ============================================================
+-- 7. INDEXES
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_posts_region_created ON posts (region_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_status         ON posts (post_status);
+CREATE INDEX IF NOT EXISTS idx_posts_location       ON posts (location_status) WHERE location_status = 'verified';
+CREATE INDEX IF NOT EXISTS idx_modqueue_pending     ON moderation_queue (status, created_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_votes_post_voter     ON post_votes (post_id, voter_id);
+CREATE INDEX IF NOT EXISTS idx_tags_tag             ON post_tags (tag);
+CREATE INDEX IF NOT EXISTS idx_users_google_uid     ON users (google_uid);
+CREATE INDEX IF NOT EXISTS idx_regions_slug         ON regions (slug);
+CREATE INDEX IF NOT EXISTS idx_pinned_posts_user    ON pinned_posts (user_id);
+CREATE INDEX IF NOT EXISTS idx_post_comments_post   ON post_comments (post_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id
+  ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread
+  ON notifications(user_id, read) WHERE read = FALSE;
+
+
+-- ============================================================
+-- 8. TRIGGER-FUNKTIONEN & TRIGGERS
+-- ============================================================
+
+-- 8a. TRIGGER: updated_at automatisch aktualisieren
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_posts_updated_at ON posts;
+CREATE TRIGGER trg_posts_updated_at
+  BEFORE UPDATE ON posts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+
+-- 8b. TRIGGER: upvote_count / downvote_count automatisch aktualisieren
+CREATE OR REPLACE FUNCTION sync_vote_counts()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE posts
+  SET
+    upvote_count   = (SELECT COUNT(*) FROM post_votes WHERE post_id = COALESCE(NEW.post_id, OLD.post_id) AND vote_type = 'upvote'),
+    downvote_count = (SELECT COUNT(*) FROM post_votes WHERE post_id = COALESCE(NEW.post_id, OLD.post_id) AND vote_type = 'downvote')
+  WHERE id = COALESCE(NEW.post_id, OLD.post_id);
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_vote_counts ON post_votes;
+CREATE TRIGGER trg_sync_vote_counts
+  AFTER INSERT OR UPDATE OR DELETE ON post_votes
+  FOR EACH ROW EXECUTE FUNCTION sync_vote_counts();
+
+
+-- 8c. TRIGGER: user_verification_stats automatisch anlegen
+CREATE OR REPLACE FUNCTION create_verification_stats()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO user_verification_stats (user_id)
+  VALUES (NEW.id);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_create_verification_stats ON users;
+CREATE TRIGGER trg_create_verification_stats
+  AFTER INSERT ON users
+  FOR EACH ROW EXECUTE FUNCTION create_verification_stats();
+
+
+-- ============================================================
+-- 9. ALTER TABLE ... ADD CONSTRAINT
+-- Named UNIQUE Constraints sicherstellen (für ON CONFLICT ON CONSTRAINT im Seed)
+-- ============================================================
+
+DO $$ BEGIN
+  ALTER TABLE region_safe_zones ADD CONSTRAINT uq_safe_zone_region_name UNIQUE (region_id, name);
+EXCEPTION WHEN duplicate_table THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE region_resources ADD CONSTRAINT uq_resource_region_title UNIQUE (region_id, title);
+EXCEPTION WHEN duplicate_table THEN NULL; END $$;
+
+
+-- ============================================================
+-- 10. SEED-DATEN
+-- ============================================================
+
+-- 10a. Initiale Regionen
+INSERT INTO regions (slug, name, intensity, active_hubs, connectivity, description, emergency_contact, center_lat, center_lng) VALUES
+  ('nepal',   'NEPAL',   'CRITICAL', 14, 62, 'Community-led support networks are active across the Kathmandu Valley.',       '+977 1-4200105',           27.7172, 85.3240),
+  ('myanmar', 'MYANMAR', 'HIGH',     28, 45, 'Civil Disobedience Movement nodes are coordinating essential services.',        'Signal: @MyanmarAid_Bot',  16.8409, 96.1735),
+  ('sudan',   'SUDAN',   'CRITICAL', 12, 38, 'Resistance Committees are managing neighborhood-level aid distribution.',       'WhatsApp: +249 912 345 678', 15.5007, 32.5599),
+  ('iran',    'IRAN',    'HIGH',     42, 55, 'Decentralized networks are providing critical updates on internet blackouts.',   'Telegram: @IranFreedom_Support', 35.6892, 51.3890),
+  ('georgia', 'GEORGIA', 'ALERT',    18, 88, 'Monitoring legislative developments and coordinating peaceful assemblies.',     '+995 32 2 123 456',        41.7151, 44.8271)
+ON CONFLICT (slug) DO NOTHING;
+
+
+-- 10b. Safe Zones & Resources für alle 5 Regionen
+
+-- NEPAL ─────────────────────────────────────────────────────
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Patan Durbar Square Community Hub',
+       'Main verified gathering point for Kathmandu Valley residents. Staffed 24/7 by local coordinators.'
+FROM regions r WHERE r.slug = 'nepal'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Bhaktapur Municipal Emergency Centre',
+       'Official emergency coordination centre in Bhaktapur. Shelter and medical triage available.'
+FROM regions r WHERE r.slug = 'nepal'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Lalitpur District Medical Station',
+       'Verified medical station operated by local volunteers. Walk-in treatment and first aid.'
+FROM regions r WHERE r.slug = 'nepal'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Kathmandu Free Medical Clinic', 'Medical', 'Thamel, Kathmandu'
+FROM regions r WHERE r.slug = 'nepal'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Nepal Red Cross – Disaster Response', 'Aid', 'Red Cross Road, Kalimati'
+FROM regions r WHERE r.slug = 'nepal'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Community Legal Aid Centre', 'Legal', 'Putalisadak, Kathmandu'
+FROM regions r WHERE r.slug = 'nepal'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+
+-- MYANMAR ────────────────────────────────────────────────────
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Mandalay Community Shelter Network',
+       'Civil society-run shelter in Mandalay. Coordinated via encrypted Signal channels.'
+FROM regions r WHERE r.slug = 'myanmar'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Yangon Civil Society Assembly Point',
+       'Verified safe meeting zone near Shwedagon. CDM network coordinators present.'
+FROM regions r WHERE r.slug = 'myanmar'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Shan State Resistance Hub',
+       'Mountain-area hub operated by local resistance committees. Radio contact maintained.'
+FROM regions r WHERE r.slug = 'myanmar'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Myanmar Civil Disobedience Medical Team', 'Medical', 'Signal: @MyanmarMedTeam'
+FROM regions r WHERE r.slug = 'myanmar'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Signal Network Legal Aid Service', 'Legal', 'Signal: @MyanmarLegal_Aid'
+FROM regions r WHERE r.slug = 'myanmar'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Emergency Food Distribution Point', 'Aid', 'Coordinate via @MyanmarAid_Bot'
+FROM regions r WHERE r.slug = 'myanmar'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+
+-- SUDAN ──────────────────────────────────────────────────────
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Khartoum Resistance Committee Safehouse',
+       'Neighbourhood-level safehouse coordinated by Khartoum Resistance Committees. Entry by referral only.'
+FROM regions r WHERE r.slug = 'sudan'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Omdurman Medical Station',
+       'Emergency medical station west of Khartoum. Sudan Doctors Network volunteers on duty.'
+FROM regions r WHERE r.slug = 'sudan'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Bahri District Community Hub',
+       'Northern Khartoum hub for aid distribution and secure communications.'
+FROM regions r WHERE r.slug = 'sudan'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Sudan Doctors Network', 'Medical', 'WhatsApp: +249 912 000 111'
+FROM regions r WHERE r.slug = 'sudan'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Community Aid Distribution Centre', 'Aid', 'Resistance Committee network – verify locally'
+FROM regions r WHERE r.slug = 'sudan'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Resistance Committee Legal Network', 'Legal', 'Telegram: @SudanRCLegal'
+FROM regions r WHERE r.slug = 'sudan'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+
+-- IRAN ───────────────────────────────────────────────────────
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Tehran Emergency Shelter Network',
+       'Decentralised shelter points across Tehran. Access via verified Telegram channel only.'
+FROM regions r WHERE r.slug = 'iran'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Isfahan Community Meeting Point',
+       'University-area gathering point. Legal observers and medics present during demonstrations.'
+FROM regions r WHERE r.slug = 'iran'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Mashhad Civil Assembly Hub',
+       'Verified assembly hub in Mashhad operated by local civil society groups.'
+FROM regions r WHERE r.slug = 'iran'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Iran Human Rights Legal Aid', 'Legal', 'Telegram: @IranHR_Legal'
+FROM regions r WHERE r.slug = 'iran'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Underground Medical Network', 'Medical', 'Signal: @IranMedUnderground'
+FROM regions r WHERE r.slug = 'iran'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'VPN & Comms Distribution Centre', 'Comms', 'Telegram: @IranFreedom_Support'
+FROM regions r WHERE r.slug = 'iran'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+
+-- GEORGIA ────────────────────────────────────────────────────
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Tbilisi Freedom Square Assembly Point',
+       'Primary peaceful assembly zone in central Tbilisi. Legal observer presence confirmed.'
+FROM regions r WHERE r.slug = 'georgia'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Rustavi Peaceful Assembly Hub',
+       'Regional coordination centre south of Tbilisi. Civil society network active.'
+FROM regions r WHERE r.slug = 'georgia'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_safe_zones (region_id, name, description)
+SELECT r.id, 'Batumi Community Network Centre',
+       'Black Sea coastal hub. International press and observer presence.'
+FROM regions r WHERE r.slug = 'georgia'
+ON CONFLICT ON CONSTRAINT uq_safe_zone_region_name DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Georgian Democracy Legal Aid', 'Legal', '+995 32 2 123 456'
+FROM regions r WHERE r.slug = 'georgia'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Community Medical Volunteer Network', 'Medical', 'Tbilisi Civil Hospital – Volunteer Wing'
+FROM regions r WHERE r.slug = 'georgia'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+INSERT INTO region_resources (region_id, title, category, location)
+SELECT r.id, 'Press Freedom Resource Centre', 'Comms', 'Rustaveli Ave, Tbilisi'
+FROM regions r WHERE r.slug = 'georgia'
+ON CONFLICT ON CONSTRAINT uq_resource_region_title DO NOTHING;
+
+
+-- ============================================================
+-- ADMIN SEED — Teammitglieder bekommen is_admin automatisch
+-- beim nächsten Login (via auth/sync). Dieser Block setzt
+-- is_admin für bereits existierende User (idempotent):
+-- ============================================================
+UPDATE users
+SET is_admin = TRUE
+WHERE email IN (
+  'emil.sack@gmail.com',
+  'lvl14egiant@gmail.com',
+  'o.chorib@gmail.com',
+  'louismelon20@gmail.com'
+);
+
+
+
+-- ============================================================
+-- 11. VERIFIKATION (Neon-Variante)
+-- ============================================================
+\echo ''
+\echo '=== Setup abgeschlossen ==='
+
+SELECT current_database() AS database,
+       current_user        AS connected_as;
+
+SELECT extname, extversion
+FROM   pg_extension
+WHERE  extname IN ('pgcrypto', 'earthdistance', 'cube')
+ORDER  BY extname;
+
+SELECT table_name
+FROM   information_schema.tables
+WHERE  table_schema = 'public'
+ORDER  BY table_name;
+
+\echo ''
+\echo 'Schema und Seed-Daten erfolgreich eingerichtet.'
+\echo ''
