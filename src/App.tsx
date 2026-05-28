@@ -11,6 +11,8 @@ import { SafetyView } from './views/SafetyView';
 import { RegionsView } from './views/RegionsView';
 import { ModerationView } from './views/ModerationView';
 import { PostDetailView } from './views/PostDetailView';
+import { ImpressumView } from './views/ImpressumView';
+import { PrivacyView } from './views/PrivacyView';
 import { Toaster, showToast, useNow, formatRelative } from './motion';
 import { Wordmark } from './components/Wordmark';
 import {
@@ -358,6 +360,12 @@ function AppContent() {
         <ModerationView user={user} onSignIn={() => setSignInOpen(true)} />
       );
     }
+    if (base === '/impressum') {
+      return <ImpressumView />;
+    }
+    if (base === '/privacy') {
+      return <PrivacyView />;
+    }
     return (
       <HubView
         regions={regions}
@@ -415,14 +423,19 @@ function AppContent() {
               </p>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(120px, auto))', gap: '4px 32px' }}>
-              {['Community Guidelines', 'Mutual Aid', 'Emergency Contact', 'Privacy Policy'].map(l => (
-                <a key={l} href="#" style={{
+              {[
+                { label: 'Community Guidelines', href: '#' },
+                { label: 'Mutual Aid',           href: '#' },
+                { label: 'Impressum',            href: '/impressum' },
+                { label: 'Privacy Policy',       href: '/privacy' },
+              ].map(({ label, href }) => (
+                <a key={label} href={href} style={{
                   fontSize: 12, color: S.muted, textDecoration: 'none', fontWeight: 500,
                   padding: '6px 0', transition: 'color 180ms ease',
                 }}
                 onMouseEnter={e => (e.currentTarget.style.color = S.primary)}
                 onMouseLeave={e => (e.currentTarget.style.color = S.muted)}>
-                  {l}
+                  {label}
                 </a>
               ))}
             </div>
