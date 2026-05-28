@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, AlertTriangle, Info, Radio, Upload, Loader2, ChevronLeft, Plus, MapPin, Crosshair } from 'lucide-react';
+import { X, Send, AlertTriangle, Info, Radio, Upload, Loader2, ChevronLeft, Plus, MapPin, Crosshair, Camera, RotateCcw, Circle } from 'lucide-react';
 import exifr from 'exifr';
 import { PostType } from '../types';
 import { apiUpload } from '../api';
@@ -84,6 +84,101 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationRef = useRef<HTMLDivElement>(null);
   const autoGeoTriedRef = useRef(false);
+
+  // --- Camera capture ---
+  const [cameraOpen,         setCameraOpen]         = useState(false);
+  const [cameraFacingMode,   setCameraFacingMode]   = useState<'user' | 'environment'>('environment');
+  const [cameraError,        setCameraError]        = useState<string | null>(null);
+  const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  const [cameraStarting,     setCameraStarting]     = useState(false);
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const stopCameraStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+  };
+
+  const startCamera = async (facing: 'user' | 'environment') => {
+    setCameraError(null);
+    setCameraStarting(true);
+    stopCameraStream();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      // Detect whether the device exposes more than one video input (typical on phones).
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setHasMultipleCameras(devices.filter(d => d.kind === 'videoinput').length > 1);
+      } catch { /* enumerate is best-effort */ }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Camera unavailable';
+      setCameraError(/denied|NotAllowed/i.test(msg) ? 'Camera permission denied.' : msg);
+    } finally {
+      setCameraStarting(false);
+    }
+  };
+
+  const openCamera = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setError('Camera capture is not supported on this device.');
+      return;
+    }
+    if (imageFiles.length >= MAX_IMAGES) {
+      setError(`You can attach up to ${MAX_IMAGES} images.`);
+      return;
+    }
+    setError(null);
+    // Desktops generally only have a front-facing webcam; phones default to the back.
+    const initialFacing: 'user' | 'environment' =
+      typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+        ? 'environment' : 'user';
+    setCameraFacingMode(initialFacing);
+    setCameraOpen(true);
+    await startCamera(initialFacing);
+  };
+
+  const closeCamera = () => {
+    stopCameraStream();
+    setCameraOpen(false);
+    setCameraError(null);
+  };
+
+  const switchCamera = async () => {
+    const next = cameraFacingMode === 'environment' ? 'user' : 'environment';
+    setCameraFacingMode(next);
+    await startCamera(next);
+  };
+
+  const captureSnapshot = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    // Draw the un-mirrored frame: the front-camera preview is mirrored via CSS
+    // for natural selfie feedback, but the saved photo should match reality.
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      setImageFiles(prev => [...prev, file]);
+      setPreviews(prev   => [...prev, URL.createObjectURL(file)]);
+      closeCamera();
+    }, 'image/jpeg', 0.92);
+  };
+
+  // Release the camera if the form unmounts while it is still open.
+  useEffect(() => () => stopCameraStream(), []);
 
   const typeConfig = {
     critical:  { color: S.primary,   bg: `${S.primary}18`,   Icon: AlertTriangle, label: 'Critical',  desc: 'Urgent safety alerts, immediate dangers or critical changes.' },
@@ -485,13 +580,22 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
                 )}
 
                 {imageFiles.length < MAX_IMAGES && (
-                  <button type="button" onClick={() => fileRef.current?.click()}
-                    style={{ width: '100%', padding: previews.length ? '10px 16px' : 16, borderRadius: 12,
-                      border: `2px dashed ${S.border}`, background: 'transparent', cursor: 'pointer',
-                      color: S.muted, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      gap: 8, fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>
-                    {previews.length > 0 ? <><Plus size={14}/> Add another</> : <><Upload size={16}/> Choose images</>}
-                  </button>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <button type="button" onClick={() => fileRef.current?.click()}
+                      style={{ padding: previews.length ? '10px 12px' : 16, borderRadius: 12,
+                        border: `2px dashed ${S.border}`, background: 'transparent', cursor: 'pointer',
+                        color: S.muted, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: 8, fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>
+                      {previews.length > 0 ? <><Plus size={14}/> Add file</> : <><Upload size={16}/> Choose images</>}
+                    </button>
+                    <button type="button" onClick={openCamera}
+                      style={{ padding: previews.length ? '10px 12px' : 16, borderRadius: 12,
+                        border: `2px dashed ${S.border}`, background: 'transparent', cursor: 'pointer',
+                        color: S.muted, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: 8, fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>
+                      <Camera size={16}/> Use camera
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -514,6 +618,80 @@ export const PostForm: React.FC<PostFormProps> = ({ regionSlug, onClose, onSubmi
           )}
         </form>
       </div>
+
+      {/* Camera capture overlay */}
+      {cameraOpen && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#000',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <button type="button" onClick={closeCamera}
+            style={{ position: 'absolute', top: 16, right: 16, width: 40, height: 40, borderRadius: 12,
+              border: `1px solid ${S.borderMd}`, background: 'rgba(0,0,0,0.6)', color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 2 }}>
+            <X size={18}/>
+          </button>
+
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            style={{ width: '100%', height: '100%', objectFit: 'contain',
+              transform: cameraFacingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+          />
+
+          {cameraError && (
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+              padding: '14px 18px', borderRadius: 12, background: 'rgba(248,113,113,0.18)',
+              border: '1px solid rgba(248,113,113,0.4)', color: '#fca5a5', fontSize: 13, fontWeight: 600,
+              maxWidth: 320, textAlign: 'center' }}>
+              {cameraError}
+            </div>
+          )}
+
+          {/* Controls */}
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0,
+            padding: '20px 24px calc(20px + env(safe-area-inset-bottom))',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+            background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)' }}>
+            {/* Switch camera (only when more than one is available) */}
+            <button type="button" onClick={switchCamera}
+              disabled={!hasMultipleCameras || cameraStarting}
+              style={{ width: 48, height: 48, borderRadius: '50%',
+                border: `1px solid ${S.borderMd}`, background: 'rgba(0,0,0,0.5)', color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: (!hasMultipleCameras || cameraStarting) ? 'not-allowed' : 'pointer',
+                opacity: hasMultipleCameras ? 1 : 0.3 }}
+              aria-label="Switch camera">
+              <RotateCcw size={20}/>
+            </button>
+
+            {/* Shutter */}
+            <button type="button" onClick={captureSnapshot}
+              disabled={cameraStarting || !!cameraError}
+              style={{ width: 72, height: 72, borderRadius: '50%',
+                border: '4px solid #fff', background: 'rgba(255,255,255,0.15)', color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: (cameraStarting || cameraError) ? 'not-allowed' : 'pointer',
+                opacity: (cameraStarting || cameraError) ? 0.5 : 1 }}
+              aria-label="Take photo">
+              {cameraStarting ? <Loader2 size={24} className="animate-spin"/> : <Circle size={48} fill="#fff" color="#fff"/>}
+            </button>
+
+            {/* Spacer to balance layout */}
+            <div style={{ width: 48, height: 48 }}/>
+          </div>
+
+          {/* Facing-mode label */}
+          <div style={{ position: 'absolute', top: 16, left: 16, padding: '6px 12px', borderRadius: 8,
+            background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 11, fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            {cameraFacingMode === 'user' ? 'Front camera' : 'Back camera'}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
