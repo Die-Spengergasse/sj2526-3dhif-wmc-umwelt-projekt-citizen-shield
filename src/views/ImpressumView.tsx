@@ -32,8 +32,8 @@ export const ImpressumView: React.FC = () => {
               Austria
             </MetaItem>
             <MetaItem icon={<Mail size={14} />} label="Contact">
-              <a style={linkStyle} href="mailto:hello@citizenshield.network">
-                hello@citizenshield.network
+              <a style={linkStyle} href="mailto:sta230286@spengergasse.at">
+                 sta230286@spengergasse.at
               </a>
             </MetaItem>
             <MetaItem icon={<Github size={14} />} label="Source">

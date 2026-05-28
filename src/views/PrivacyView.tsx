@@ -63,8 +63,8 @@ export const PrivacyView: React.FC = () => {
           <p style={pStyle}>
             For any privacy-related request — access, deletion, objection, or a simple question —
             write to{' '}
-            <a style={linkStyle} href="mailto:privacy@citizenshield.network">
-              privacy@citizenshield.network
+            <a style={linkStyle} href="mailto:sta230286@spengergasse.at">
+              sta230286@spengergasse.at
             </a>
             . We aim to respond within 14 days.
           </p>
